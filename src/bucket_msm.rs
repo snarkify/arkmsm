@@ -5,6 +5,9 @@ use ark_std::{One, Zero};
 
 use crate::{bitmap::Bitmap, list, types::G1Projective};
 
+const GROUP_SIZE_LOG2: usize = 6;
+const GROUP_SIZE: usize = 1 << GROUP_SIZE_LOG2;
+
 pub struct BucketMSM<G: AffineCurve> {
     num_windows: u32,
     window_bits: u32,
@@ -50,7 +53,7 @@ impl<G: AffineCurve> BucketMSM<G> {
         max_collision_cnt: u32, // default: 128
     ) -> BucketMSM<G> {
         let num_windows = (scalar_bits + window_bits - 1) / window_bits;
-        let batch_size = std::cmp::max(8192, max_batch_cnt);
+        let batch_size = std::cmp::max(8192, std::cmp::max(max_batch_cnt, num_windows * 1 << (window_bits - GROUP_SIZE_LOG2 as u32)));
         let bucket_bits = window_bits - 1; // half buckets needed because of signed-bucket-index
         let bucket_size = num_windows << bucket_bits;
 
@@ -370,28 +373,69 @@ impl<G: AffineCurve> BucketMSM<G> {
         p.y = p.y - q.y;
     }
 
-    pub fn msm_reduce(&mut self) -> G1Projective {
-        let window_starts: Vec<_> = (0..self.num_windows).collect();
+    pub fn batch_reduce(&mut self) -> G1Projective {
+        let window_starts: Vec<_> = (0..self.num_windows as usize).collect();
+        let num_groups = (self.num_windows as usize) << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
+        let mut running_sums: Vec<_> = vec![G1Affine::zero(); num_groups];
+        let mut sum_of_sums: Vec<_> = vec![G1Affine::zero(); num_groups];
 
-        let window_sums: Vec<G1Projective> = ark_std::cfg_into_iter!(window_starts)
+        // calculate running sum and sum of sum for each group
+        for i in (0..GROUP_SIZE).rev() {
+            // running sum
+            self.inverse_state = <G1Affine as AffineCurve>::BaseField::one();
+            for g in 0..num_groups {
+                BucketMSM::<G1Affine>::batch_add_phase_one(&running_sums[g], &self.buckets[(g << GROUP_SIZE_LOG2) + i], g, &mut self.inverse_state, &mut self.inverses);
+            }
+            self.inverse_state = self.inverse_state.inverse().unwrap();
+            for g in (0..num_groups).rev() {
+                BucketMSM::<G1Affine>::batch_add_phase_two(&mut running_sums[g], &self.buckets[(g << GROUP_SIZE_LOG2) + i], g, &mut self.inverse_state, &mut self.inverses);
+            }
+
+            // sum of sum
+            self.inverse_state = <G1Affine as AffineCurve>::BaseField::one();
+            for g in 0..num_groups {
+                BucketMSM::<G1Affine>::batch_add_phase_one(&sum_of_sums[g], &running_sums[g], g, &mut self.inverse_state, &mut self.inverses);
+            }
+            self.inverse_state = self.inverse_state.inverse().unwrap();
+            for g in (0..num_groups).rev() {
+                BucketMSM::<G1Affine>::batch_add_phase_two(&mut sum_of_sums[g], &running_sums[g], g,  &mut self.inverse_state, &mut self.inverses);
+            }
+        }
+
+        let sum_by_window: Vec<G1Projective> = ark_std::cfg_into_iter!(window_starts)
             .map(|w_start| {
-                let bucket_start = (w_start << self.bucket_bits) as usize;
-                let bucket_end = (bucket_start + (1 << self.bucket_bits)) as usize;
-                self.inner_window_reduce(bucket_start, bucket_end)
-            })
-            .collect();
+                let group_start = w_start << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
+                let group_end = (w_start + 1) << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
+                self.inner_window_reduce(&running_sums[group_start..group_end], &sum_of_sums[group_start..group_end])
+            }).collect();
 
-        return self.intra_window_reduce(&window_sums);
+        return self.intra_window_reduce(&sum_by_window);
     }
 
-    fn inner_window_reduce(&mut self, start: usize, end: usize) -> G1Projective {
-        let mut running_sum = G1Projective::zero();
-        let mut res = G1Projective::zero();
-        self.buckets[start..end].iter().rev().for_each(|b| {
-            running_sum.add_assign_mixed(b);
-            res += &running_sum;
-        });
-        return res;
+    fn inner_window_reduce(&mut self, running_sums: &[G1Affine], sum_of_sums: &[G1Affine]) -> G1Projective {
+        return self.calc_sum_of_sum_total(sum_of_sums) + self.calc_running_sum_total(running_sums);
+    }
+
+    fn calc_running_sum_total(&mut self, running_sums: &[G1Affine]) -> G1Projective {
+        let num_groups = 1 << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
+
+        let mut running_sum_total = G1Projective::zero();
+        for i in 1..num_groups {
+            for _ in 0..i {
+                running_sum_total.add_assign_mixed(&running_sums[i]);
+            }
+        }
+
+        for _ in 0..GROUP_SIZE_LOG2 {
+            running_sum_total.double_in_place();
+        }
+        return running_sum_total;
+    }
+
+    fn calc_sum_of_sum_total(&mut self, sum_of_sums: &[G1Affine]) -> G1Projective {
+        let mut sum = G1Projective::zero();
+        sum_of_sums.iter().for_each(|p| sum.add_assign_mixed(p));
+        return sum;
     }
 
     fn intra_window_reduce(&mut self, window_sums: &Vec<G1Projective>) -> G1Projective {
@@ -400,16 +444,16 @@ impl<G: AffineCurve> BucketMSM<G> {
 
         // We're traversing windows from high to low.
         lowest
-            + &window_sums[1..]
-                .iter()
-                .rev()
-                .fold(G1Projective::zero(), |mut total, sum_i| {
-                    total += sum_i;
-                    for _ in 0..self.window_bits {
-                        total.double_in_place();
-                    }
-                    total
-                })
+        + &window_sums[1..]
+            .iter()
+            .rev()
+            .fold(G1Projective::zero(), |mut total, sum_i| {
+                total += sum_i;
+                for _ in 0..self.window_bits {
+                    total.double_in_place();
+                }
+                total
+            })
     }
 }
 

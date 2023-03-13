@@ -21,8 +21,6 @@ fn msm_slice(scalar: G1BigInt, slices: &mut Vec<u32>, window_bits: u32) {
         temp.divn(window_bits);
     }
 
-    // print!("slices {:?}\n", slices);
-
     let mut carry = 0;
     let total = 1 << window_bits;
     let half = total >> 1;
@@ -64,7 +62,7 @@ pub fn quick_msm(run: &MSMRun) -> G1Projective {
     });
 
     bucket_msm.process_complete();
-    return bucket_msm.msm_reduce();
+    return bucket_msm.batch_reduce();
 }
 
 #[cfg(test)]

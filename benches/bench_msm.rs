@@ -7,7 +7,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 
 fn msm(c: &mut Criterion) {
     let mut group = c.benchmark_group("msm");
-    for size in (8..12) {
+    for size in 8..13 {
         let (point_vec, scalar_vec) = generate_msm_inputs::<G1Affine>(1 << size);
         let point_vec = black_box(point_vec);
         let scalar_vec = black_box(scalar_vec);

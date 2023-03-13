@@ -1,6 +1,6 @@
 use ark_bls12_381::G1Affine;
 use ark_ec::{AffineCurve, ProjectiveCurve};
-use ark_ff::{prelude::*, PrimeField};
+use ark_ff::{PrimeField, prelude::*};
 use ark_std::vec::Vec;
 
 use crate::{
@@ -15,11 +15,19 @@ fn ln_without_floats(a: usize) -> usize {
     (ark_std::log2(a) * 69 / 100) as usize
 }
 
+
+// WARNING: this function is for test purpose only
+// when scalar_bit_length % ws == 0, the sign-bucket-index assert would be
+// triggered
 pub fn get_opt_window_size(num_points: usize) -> usize {
     if num_points < 32 {
         3
     } else {
-        ln_without_floats(num_points) + 2
+        let mut ws = ln_without_floats(num_points) + 2;
+        if num_points >= (1 << 14) && num_points < (1 << 16) {
+            ws += 1;
+        }
+        ws
     }
 }
 
@@ -131,9 +139,9 @@ pub fn compute_msm_opt(
     let msm_run = MSMRun {
         points: point_vec.to_vec(),
         scalars: scalar_vec.to_vec(),
-        window_bits,
-        max_batch: 1024,
-        max_collisions: 2048,
+        window_bits: window_bits,
+        max_batch: 2048,
+        max_collisions: 256,
     };
     return quick_msm(&msm_run);
 }
