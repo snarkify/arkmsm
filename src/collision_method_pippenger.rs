@@ -14,22 +14,33 @@ pub struct MSMRun {
 }
 
 fn msm_slice(scalar: G1BigInt, slices: &mut Vec<u32>, window_bits: u32) {
+    assert!(window_bits <= 31); // reserve one bit for marking signed slices
     let mut temp = scalar;
     for i in 0..slices.len() {
         slices[i] = (temp.as_ref()[0] % (1 << window_bits)) as u32;
         temp.divn(window_bits);
     }
 
-    //    for i in 0..8 {
-    //        if sliced[i] > 0x4000 {
-    //            sliced[i + 1] += 1;
-    //            sliced[i] = if sliced[i] == 0x8000 {
-    //                0
-    //            } else {
-    //                sliced[i] ^ 0x80007FFF
-    //            };
-    //        }
-    //    }
+    // print!("slices {:?}\n", slices);
+
+    let mut carry = 0;
+    let total = 1 << window_bits;
+    let half = total >> 1;
+    for i in 0..slices.len() {
+        slices[i] += carry;
+        if slices[i] > half {
+            // slices[i] == half is okay, since (slice[i]-1) will be used for bucket_id
+            slices[i] = total - slices[i];
+            carry = 1;
+            slices[i] |= 1 << 31; // mark the highest bit for later
+        } else {
+            carry = 0;
+        }
+    }
+    assert!(
+        carry == 0,
+        "msm_slice overflows when apply signed-bucket-index"
+    );
 }
 
 pub fn quick_msm(run: &MSMRun) -> G1Projective {
@@ -65,9 +76,9 @@ mod collision_method_pippenger_tests {
         let scalar = G1BigInt::from(0b101);
         let mut slices: Vec<u32> = vec![0; 3];
         msm_slice(scalar, &mut slices, 1);
+        // print!("slices {:?}\n", slices);
         assert_eq!(slices.iter().eq([1, 0, 1].iter()), true);
     }
-
     #[test]
     fn test_msm_slice_window_size_2() {
         let scalar = G1BigInt::from(0b000110);
@@ -78,10 +89,10 @@ mod collision_method_pippenger_tests {
 
     #[test]
     fn test_msm_slice_window_size_3() {
-        let scalar = G1BigInt::from(0b111010000);
+        let scalar = G1BigInt::from(0b010111000);
         let mut slices: Vec<u32> = vec![0; 3];
         msm_slice(scalar, &mut slices, 3);
-        assert_eq!(slices.iter().eq([0, 2, 7].iter()), true);
+        assert_eq!(slices.iter().eq([0, 0x80000001, 3].iter()), true);
     }
 
     #[test]

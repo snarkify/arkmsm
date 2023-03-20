@@ -8,6 +8,7 @@ use crate::{bitmap::Bitmap, list, types::G1Projective};
 pub struct BucketMSM<G: AffineCurve> {
     num_windows: u32,
     window_bits: u32,
+    bucket_bits: u32,
 
     buckets: Vec<G1Affine>, // size (num_windows << window_bits) * 2
     results: G,             // output
@@ -50,8 +51,8 @@ impl<G: AffineCurve> BucketMSM<G> {
     ) -> BucketMSM<G> {
         let num_windows = (scalar_bits + window_bits - 1) / window_bits;
         let batch_size = std::cmp::max(8192, max_batch_cnt);
-        // window_bits -= 1; // half number of buckets needed because of NAF
-        let bucket_size = num_windows << window_bits;
+        let bucket_bits = window_bits - 1; // half buckets needed because of signed-bucket-index
+        let bucket_size = num_windows << bucket_bits;
 
         // link all the collision_list_nodes into a list
         let max_size = max_collision_cnt * 2;
@@ -64,6 +65,7 @@ impl<G: AffineCurve> BucketMSM<G> {
         BucketMSM {
             num_windows,
             window_bits,
+            bucket_bits,
 
             buckets: vec![G1Affine::zero(); bucket_size as usize],
             results: G::zero(),
@@ -92,60 +94,38 @@ impl<G: AffineCurve> BucketMSM<G> {
     pub fn process_point_and_slices(&mut self, point: &G1Affine, slices: &Vec<u32>) {
         assert!(
             self.num_windows as usize == slices.len(),
-            "slices.len() should equal num_windows"
+            "slices.len() {} should equal num_windows {}",
+            slices.len(),
+            self.num_windows
         );
 
-        self.cur_points[self.cur_points_cnt as usize] = *point;
+        // print!("point count: {}, num_windows {}, slices.len() {}\n", self.cur_points_cnt, self.num_windows, slices.len());
+        // print!("slices {:?}\n", slices);
+
+        self.cur_points[self.cur_points_cnt as usize] = *point; // copy
         self.cur_points_cnt += 1;
         for win in 0..slices.len() {
-            if slices[win] > 0 {
-                // print!("win: {}, win shift: {}, slice: {}\n", win, (win << self.window_bits), slices[win]);
-                let bucket_id = (win << self.window_bits) as u32 + slices[win] - 1; // skip case slice == 0
+            if (slices[win] as i32) > 0 {
+                let bucket_id = (win << self.bucket_bits) as u32 + slices[win] - 1; // skip slice == 0
 
-                if !self.bitmap.test_and_set(bucket_id) {
-                    // if no collision found, add point to current batch
-                    let acc = &self.buckets[bucket_id as usize];
-                    // print!("bucket_id: {}, pair index: {}, point index {}\n", bucket_id, self.cur_batch_cnt, self.cur_points_cnt - 1);
-                    BucketMSM::<G1Affine>::batch_add_phase_one(
-                        acc,
-                        point,
-                        self.cur_batch_cnt as usize,
-                        &mut self.inverse_state,
-                        &mut self.inverses,
-                    );
+                // print!("win: {}, win shift: {}, slice: {}, bucket_id {}\n", win, (win << self.bucket_bits), slices[win], bucket_id);
+                self._process_slices(bucket_id, point);
+            }
+        }
 
-                    self.cur_bkt_pnt_pairs[self.cur_batch_cnt as usize] =
-                        ((bucket_id as u64) << 14) + self.cur_points_cnt as u64 - 1;
-                    self.cur_batch_cnt += 1;
-                } else {
-                    // if collision, add point to unprocessed_list
-                    // free_slot index both collision_list_nodes and cur_points+max_collision_cnt
-                    //
-                    // processed_list:      ------------------------------->|
-                    // collision_list_nodes:            [<bucket_id, next>, <bucket_id, next>, ...]
-                    // cur_points: [ max_batch_cnt area |  point1,           point, ...           ]
-                    let free_node_index =
-                        list::pop(&self.collision_list_nodes, &mut self.available_list);
-                    // print!("bucket_id {}, free_node_index {}, collision_cnt {}, max_collision_cnt {}\n", bucket_id, free_node_index, self.collision_cnt, self.max_collision_cnt);
-                    assert!(free_node_index < 2 * self.max_collision_cnt);
-                    self.collision_list_nodes[free_node_index as usize] =
-                        ((bucket_id as u64) << 14) + 0x3FFF;
-                    list::enqueue(
-                        &mut self.collision_list_nodes,
-                        &mut self.unprocessed_list,
-                        free_node_index,
-                    );
-                    self.collision_cnt += 1;
+        let mut neg_p = *point;
+        neg_p.y = -neg_p.y;
 
-                    // cur_points: [max_batch_cnt points | 2*max_collisions points]
-                    self.cur_points[(self.max_batch_cnt + free_node_index) as usize] = *point; // copy
-                    // print!("Collision: bucket_id {}, point_idx {}\n", bucket_id, free_node_index);
-                }
+        self.cur_points[self.cur_points_cnt as usize] = neg_p; // copy
+        self.cur_points_cnt += 1;
+        for win in 0..slices.len() {
+            if (slices[win] as i32) < 0 {
+                let slice = slices[win] & 0x7FFFFFFF;
+                if slice > 0 {
+                    let bucket_id = (win << self.bucket_bits) as u32 + slice - 1; // skip slice == 0
 
-                if self.collision_cnt >= self.max_collision_cnt
-                    || self.cur_batch_cnt >= self.max_batch_cnt
-                {
-                    self._process_batch();
+                    // print!("win: {}, win shift: {}, slice: {}, bucket_id {}\n", win, (win << self.bucket_bits), slices[win], bucket_id);
+                    self._process_slices(bucket_id, &neg_p);
                 }
             }
         }
@@ -154,6 +134,53 @@ impl<G: AffineCurve> BucketMSM<G> {
     pub fn process_complete(&mut self) {
         self._process_batch();
         while !list::is_empty(self.unprocessed_list) || !list::is_empty(self.processing_list) {
+            self._process_batch();
+        }
+    }
+
+    fn _process_slices(&mut self, bucket_id: u32, point: &G1Affine) {
+        if !self.bitmap.test_and_set(bucket_id) {
+            // if no collision found, add point to current batch
+
+            let acc = &self.buckets[bucket_id as usize];
+            // print!("bucket_id: {}, pair index: {}, point index {}\n", bucket_id, self.cur_batch_cnt, self.cur_points_cnt - 1);
+            BucketMSM::<G1Affine>::batch_add_phase_one(
+                acc,
+                point,
+                self.cur_batch_cnt as usize,
+                &mut self.inverse_state,
+                &mut self.inverses,
+            );
+
+            self.cur_bkt_pnt_pairs[self.cur_batch_cnt as usize] =
+                ((bucket_id as u64) << 14) + self.cur_points_cnt as u64 - 1;
+            self.cur_batch_cnt += 1;
+        } else {
+            // if collision, add point to unprocessed_list
+            // free_slot index both collision_list_nodes and cur_points+max_collision_cnt
+            //
+            // processed_list:      ------------------------------->|
+            // collision_list_nodes:            [<bucket_id, next>, <bucket_id, next>, ...]
+            // cur_points: [ max_batch_cnt area |  point1,           point, ...           ]
+            let free_node_index = list::pop(&self.collision_list_nodes, &mut self.available_list);
+            // print!("bucket_id {}, free_node_index {}, collision_cnt {}, max_collision_cnt {}\n", bucket_id, free_node_index, self.collision_cnt, self.max_collision_cnt);
+            assert!(free_node_index < 2 * self.max_collision_cnt);
+            self.collision_list_nodes[free_node_index as usize] =
+                ((bucket_id as u64) << 14) + 0x3FFF;
+            list::enqueue(
+                &mut self.collision_list_nodes,
+                &mut self.unprocessed_list,
+                free_node_index,
+            );
+            self.collision_cnt += 1;
+
+            // cur_points: [max_batch_cnt points | 2*max_collisions points]
+            self.cur_points[(self.max_batch_cnt + free_node_index) as usize] = *point; // copy
+            // print!("Collision: bucket_id {}, point_idx {}\n", bucket_id, free_node_index);
+        }
+
+        if self.collision_cnt >= self.max_collision_cnt || self.cur_batch_cnt >= self.max_batch_cnt
+        {
             self._process_batch();
         }
     }
@@ -219,7 +246,7 @@ impl<G: AffineCurve> BucketMSM<G> {
 
                 let acc = &self.buckets[bucket_id as usize];
                 // space after max_batch_cnt for collisioned points
-                let point_idx = self.max_batch_cnt + cur_node_idx; 
+                let point_idx = self.max_batch_cnt + cur_node_idx;
                 // print!("_process_batch: bucket_id {}, point index: {}, batch index {}\n", bucket_id, point_idx, self.cur_batch_cnt);
                 BucketMSM::<G1Affine>::batch_add_phase_one(
                     acc,
@@ -348,8 +375,8 @@ impl<G: AffineCurve> BucketMSM<G> {
 
         let window_sums: Vec<G1Projective> = ark_std::cfg_into_iter!(window_starts)
             .map(|w_start| {
-                let bucket_start = (w_start << self.window_bits) as usize;
-                let bucket_end = (bucket_start + (1 << self.window_bits)) as usize;
+                let bucket_start = (w_start << self.bucket_bits) as usize;
+                let bucket_end = (bucket_start + (1 << self.bucket_bits)) as usize;
                 self.inner_window_reduce(bucket_start, bucket_end)
             })
             .collect();
@@ -394,7 +421,8 @@ mod bucket_msm_tests {
 
     #[test]
     fn test_process_point_and_slices_deal_two_points() {
-        let mut bucket_msm = BucketMSM::<G1Affine>::new(30u32, 15u32, 128u32, 4096u32);
+        let window_bits = 15u32;
+        let mut bucket_msm = BucketMSM::<G1Affine>::new(30u32, window_bits, 128u32, 4096u32);
         let mut rng = ark_std::test_rng();
         let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
@@ -406,12 +434,13 @@ mod bucket_msm_tests {
         bucket_msm.process_complete();
         assert_eq!(bucket_msm.buckets[0], p);
         assert_eq!(bucket_msm.buckets[1], q);
-        assert_eq!(bucket_msm.buckets[2 + (1 << 15)], p + q);
+        assert_eq!(bucket_msm.buckets[2 + (1 << bucket_msm.bucket_bits)], p + q);
     }
 
     #[test]
     fn test_process_point_and_slices_deal_three_points() {
-        let mut bucket_msm = BucketMSM::<G1Affine>::new(45u32, 15u32, 128u32, 4096u32);
+        let window_bits = 15u32;
+        let mut bucket_msm = BucketMSM::<G1Affine>::new(45u32, window_bits, 128u32, 4096u32);
         let mut rng = ark_std::test_rng();
         let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
@@ -426,9 +455,12 @@ mod bucket_msm_tests {
         bucket_msm.process_complete();
         assert_eq!(bucket_msm.buckets[0], p);
         assert_eq!(bucket_msm.buckets[1], q + r);
-        assert_eq!(bucket_msm.buckets[2 + (1 << 15)], p + q + r);
-        assert_eq!(bucket_msm.buckets[3 + (2 << 15)], p + q);
-        assert_eq!(bucket_msm.buckets[4 + (2 << 15)], r);
+        assert_eq!(
+            bucket_msm.buckets[2 + (1 << bucket_msm.bucket_bits)],
+            p + q + r
+        );
+        assert_eq!(bucket_msm.buckets[3 + (2 << bucket_msm.bucket_bits)], p + q);
+        assert_eq!(bucket_msm.buckets[4 + (2 << bucket_msm.bucket_bits)], r);
     }
 }
 
