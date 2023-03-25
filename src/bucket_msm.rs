@@ -1,9 +1,8 @@
 use ark_bls12_381::G1Affine;
 use ark_ec::{AffineCurve, ProjectiveCurve};
-use ark_ff::Field;
-use ark_std::{One, Zero};
+use ark_std::{Zero};
 
-use crate::{bitmap::Bitmap, list, types::G1Projective};
+use crate::{bitmap::Bitmap, list, types::G1Projective, batch_adder::BatchAdder};
 
 const GROUP_SIZE_LOG2: usize = 6;
 const GROUP_SIZE: usize = 1 << GROUP_SIZE_LOG2;
@@ -23,9 +22,8 @@ pub struct BucketMSM<G: AffineCurve> {
     cur_batch_cnt: u32,          // number of slices to be processed in current batch
     max_batch_cnt: u32,          // max slices allowed in a batch
 
-    // inverse state
-    inverse_state: <G1Affine as AffineCurve>::BaseField,
-    inverses: Vec<<G1Affine as AffineCurve>::BaseField>, // size max_batch_cnt
+    // batch affine adder
+    batch_adder: BatchAdder,
 
     // collision and pending slices state
     //
@@ -53,9 +51,11 @@ impl<G: AffineCurve> BucketMSM<G> {
         max_collision_cnt: u32, // default: 128
     ) -> BucketMSM<G> {
         let num_windows = (scalar_bits + window_bits - 1) / window_bits;
-        let batch_size = std::cmp::max(8192, std::cmp::max(max_batch_cnt, num_windows * 1 << (window_bits - GROUP_SIZE_LOG2 as u32)));
+        let batch_size = std::cmp::max(8192, max_batch_cnt);
         let bucket_bits = window_bits - 1; // half buckets needed because of signed-bucket-index
         let bucket_size = num_windows << bucket_bits;
+        // size of batch_adder will be the max of batch_size and num_windows * groups per window
+        let batch_adder_size = std::cmp::max(batch_size, bucket_size >> GROUP_SIZE_LOG2);
 
         // link all the collision_list_nodes into a list
         let max_size = max_collision_cnt * 2;
@@ -80,8 +80,7 @@ impl<G: AffineCurve> BucketMSM<G> {
             cur_batch_cnt: 0,
             max_batch_cnt,
 
-            inverse_state: <G1Affine as AffineCurve>::BaseField::one(),
-            inverses: vec![<G1Affine as AffineCurve>::BaseField::one(); batch_size as usize],
+            batch_adder: BatchAdder::new(batch_adder_size as usize),
 
             bitmap: Bitmap::new(bucket_size as usize / 32),
             collision_cnt: 0,
@@ -147,13 +146,7 @@ impl<G: AffineCurve> BucketMSM<G> {
 
             let acc = &self.buckets[bucket_id as usize];
             // print!("bucket_id: {}, pair index: {}, point index {}\n", bucket_id, self.cur_batch_cnt, self.cur_points_cnt - 1);
-            BucketMSM::<G1Affine>::batch_add_phase_one(
-                acc,
-                point,
-                self.cur_batch_cnt as usize,
-                &mut self.inverse_state,
-                &mut self.inverses,
-            );
+            self.batch_adder.batch_add_phase_one(acc, point, self.cur_batch_cnt as usize);
 
             self.cur_bkt_pnt_pairs[self.cur_batch_cnt as usize] =
                 ((bucket_id as u64) << 14) + self.cur_points_cnt as u64 - 1;
@@ -192,7 +185,7 @@ impl<G: AffineCurve> BucketMSM<G> {
         // print!("_process_batch: collision_cnt {} cur_batch_cnt {}\n", self.collision_cnt, self.cur_batch_cnt);
 
         // batch add phase two
-        self.inverse_state = self.inverse_state.inverse().unwrap();
+        self.batch_adder.inverse();
         for i in (0..self.cur_batch_cnt).rev() {
             let bucket_point = self.cur_bkt_pnt_pairs[i as usize];
             let point = &self.cur_points[(bucket_point & 0x3FFF) as usize];
@@ -200,13 +193,7 @@ impl<G: AffineCurve> BucketMSM<G> {
             // print!("phase_two: bucket_id: {}, pair index: {}, point_idx {}\n", bucket_point >> 14, i, bucket_point & 0x3FFF);
             // print!{"phase_two acc: {}\n", acc};
             // print!{"phase_two point: {}\n", point};
-            BucketMSM::<G1Affine>::batch_add_phase_two(
-                acc,
-                point,
-                i as usize,
-                &mut self.inverse_state,
-                &mut self.inverses,
-            );
+            self.batch_adder.batch_add_phase_two(acc, point, i as usize);
             // print!{"phase_two result: {}\n", acc};
         }
 
@@ -220,7 +207,7 @@ impl<G: AffineCurve> BucketMSM<G> {
         );
 
         // reset inverse_state
-        self.inverse_state.set_one();
+        self.batch_adder.reset();
 
         // previous points were processed except the last
         self.cur_points[0] = self.cur_points[self.cur_points_cnt as usize - 1];
@@ -251,13 +238,7 @@ impl<G: AffineCurve> BucketMSM<G> {
                 // space after max_batch_cnt for collisioned points
                 let point_idx = self.max_batch_cnt + cur_node_idx;
                 // print!("_process_batch: bucket_id {}, point index: {}, batch index {}\n", bucket_id, point_idx, self.cur_batch_cnt);
-                BucketMSM::<G1Affine>::batch_add_phase_one(
-                    acc,
-                    point,
-                    self.cur_batch_cnt as usize,
-                    &mut self.inverse_state,
-                    &mut self.inverses,
-                );
+                self.batch_adder.batch_add_phase_one(acc, point, self.cur_batch_cnt as usize);
 
                 // print!("bucket_id {}, point idx {}\n", bucket_id, cur_node_idx);
 
@@ -283,96 +264,6 @@ impl<G: AffineCurve> BucketMSM<G> {
         }
     }
 
-    // Two-pass batch affine addition
-    //   - 1st pass calculates from left to right
-    //      - state: accumulated product of deltaX
-    //      - inverses[]: accumulated product left to a point
-    //   - inverse state
-    //   - 2nd pass calculates from right to left
-    //      - slope s and ss from state
-    //      - state =  state * deltaX
-    //      - addition result acc
-    fn batch_add_phase_one(
-        p: &G1Affine,
-        q: &G1Affine,
-        idx: usize,
-        inverse_state: &mut <G1Affine as AffineCurve>::BaseField,
-        inverses: &mut Vec<<G1Affine as AffineCurve>::BaseField>,
-    ) {
-        if p.is_zero() | q.is_zero() {
-            return;
-        }
-
-        let mut delta_x = q.x - p.x;
-        if delta_x.is_zero() {
-            let delta_y = q.y - p.y;
-            if !delta_y.is_zero() {
-                // p = -q, return
-                return;
-            }
-
-            // if P == Q
-            // if delta_x is zero, we need to invert 2y
-            delta_x = q.y + q.y;
-        }
-
-        if inverse_state.is_zero() {
-            inverses[idx].set_one();
-            *inverse_state = delta_x;
-        } else {
-            inverses[idx] = *inverse_state;
-            *inverse_state *= delta_x
-        }
-    }
-
-    // should call compute inverse of state->inverse_state between phase_one and phase_two
-    fn batch_add_phase_two(
-        p: &mut G1Affine,
-        q: &G1Affine,
-        idx: usize,
-        inverse_state: &mut <G1Affine as AffineCurve>::BaseField,
-        inverses: &Vec<<G1Affine as AffineCurve>::BaseField>,
-    ) {
-        if p.is_zero() | q.is_zero() {
-            if !q.is_zero() {
-                *p = q.clone();
-            }
-            return;
-        }
-
-        let mut _inverse = inverses[idx];
-        _inverse *= *inverse_state;
-
-        let mut delta_x = q.x - p.x;
-        let mut delta_y = q.y - p.y;
-
-        if delta_x.is_zero() {
-            if !delta_y.is_zero() {
-                // p = -q, result should be pt at infinity
-                p.set_zero();
-                return;
-            }
-            // Otherwise, p = q, and it's point doubling
-            // Processing is almost the same, except s=3*affine.x^2 / 2*affine.y
-
-            // set delta_y = 3*q.x^2
-            delta_y = q.x.square();
-            delta_y = delta_y + delta_y + delta_y;
-
-            delta_x = q.y.double();
-        }
-
-        // get the state ready for the next iteration
-        *inverse_state *= delta_x;
-
-        let s = delta_y * _inverse;
-        let ss = s * s;
-        p.x = ss - q.x - p.x;
-        delta_x = q.x - p.x;
-        p.y = s * delta_x;
-        p.y = p.y - q.y;
-    }
-
     pub fn batch_reduce(&mut self) -> G1Projective {
         let window_starts: Vec<_> = (0..self.num_windows as usize).collect();
         let num_groups = (self.num_windows as usize) << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
@@ -382,31 +273,21 @@ impl<G: AffineCurve> BucketMSM<G> {
         // calculate running sum and sum of sum for each group
         for i in (0..GROUP_SIZE).rev() {
             // running sum
-            self.inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-            for g in 0..num_groups {
-                BucketMSM::<G1Affine>::batch_add_phase_one(&running_sums[g], &self.buckets[(g << GROUP_SIZE_LOG2) + i], g, &mut self.inverse_state, &mut self.inverses);
-            }
-            self.inverse_state = self.inverse_state.inverse().unwrap();
-            for g in (0..num_groups).rev() {
-                BucketMSM::<G1Affine>::batch_add_phase_two(&mut running_sums[g], &self.buckets[(g << GROUP_SIZE_LOG2) + i], g, &mut self.inverse_state, &mut self.inverses);
-            }
-
+            self.batch_adder.batch_add_step_n(&mut running_sums,
+                                              1,
+                                              &self.buckets[i..],
+                                              GROUP_SIZE,
+                                              num_groups);
             // sum of sum
-            self.inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-            for g in 0..num_groups {
-                BucketMSM::<G1Affine>::batch_add_phase_one(&sum_of_sums[g], &running_sums[g], g, &mut self.inverse_state, &mut self.inverses);
-            }
-            self.inverse_state = self.inverse_state.inverse().unwrap();
-            for g in (0..num_groups).rev() {
-                BucketMSM::<G1Affine>::batch_add_phase_two(&mut sum_of_sums[g], &running_sums[g], g,  &mut self.inverse_state, &mut self.inverses);
-            }
+            self.batch_adder.batch_add(&mut sum_of_sums, &running_sums);
         }
 
         let sum_by_window: Vec<G1Projective> = ark_std::cfg_into_iter!(window_starts)
             .map(|w_start| {
                 let group_start = w_start << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
                 let group_end = (w_start + 1) << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
-                self.inner_window_reduce(&running_sums[group_start..group_end], &sum_of_sums[group_start..group_end])
+                self.inner_window_reduce(&running_sums[group_start..group_end],
+                                         &sum_of_sums[group_start..group_end])
             }).collect();
 
         return self.intra_window_reduce(&sum_by_window);
@@ -417,10 +298,8 @@ impl<G: AffineCurve> BucketMSM<G> {
     }
 
     fn calc_running_sum_total(&mut self, running_sums: &[G1Affine]) -> G1Projective {
-        let num_groups = 1 << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
-
         let mut running_sum_total = G1Projective::zero();
-        for i in 1..num_groups {
+        for i in 1..running_sums.len() {
             for _ in 0..i {
                 running_sum_total.add_assign_mixed(&running_sums[i]);
             }
@@ -505,207 +384,5 @@ mod bucket_msm_tests {
         );
         assert_eq!(bucket_msm.buckets[3 + (2 << bucket_msm.bucket_bits)], p + q);
         assert_eq!(bucket_msm.buckets[4 + (2 << bucket_msm.bucket_bits)], r);
-    }
-}
-
-#[cfg(test)]
-mod batch_add_tests {
-    use super::*;
-    use ark_ec::ProjectiveCurve;
-    use ark_std::UniformRand;
-    use std::ops::Add;
-
-    #[test]
-    fn test_phase_one_zero_or_neg() {
-        let mut inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-        let mut inverses = vec![<G1Affine as AffineCurve>::BaseField::one(); 4 as usize];
-        BucketMSM::<G1Affine>::batch_add_phase_one(
-            &G1Affine::zero(),
-            &G1Affine::zero(),
-            0,
-            &mut inverse_state,
-            &mut inverses,
-        );
-
-        let mut rng = ark_std::test_rng();
-        let p = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let p_affine = G1Affine::from(p);
-        let mut neg_p_affine = p_affine.clone();
-        neg_p_affine.y = -neg_p_affine.y;
-
-        BucketMSM::<G1Affine>::batch_add_phase_one(
-            &p_affine,
-            &neg_p_affine,
-            0,
-            &mut inverse_state,
-            &mut inverses,
-        );
-    }
-
-    #[test]
-    fn test_phase_one_p_add_p() {
-        let mut inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-        let mut inverses = vec![<G1Affine as AffineCurve>::BaseField::one(); 4 as usize];
-        let mut rng = ark_std::test_rng();
-        let prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let p = G1Affine::from(prj);
-        let acc = p.clone();
-
-        BucketMSM::<G1Affine>::batch_add_phase_one(&acc, &p, 0, &mut inverse_state, &mut inverses);
-        assert_eq!(inverses[0].is_one(), true);
-        assert_eq!(inverse_state, p.y + p.y);
-    }
-
-    #[test]
-    fn test_phase_one_p_add_q() {
-        let mut inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-        let mut inverses = vec![<G1Affine as AffineCurve>::BaseField::one(); 4 as usize];
-        let mut rng = ark_std::test_rng();
-        let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let p = G1Affine::from(p_prj);
-        let q = G1Affine::from(q_prj);
-
-        BucketMSM::<G1Affine>::batch_add_phase_one(&p, &q, 0, &mut inverse_state, &mut inverses);
-        assert_eq!(inverses[0].is_one(), true);
-        assert_eq!(inverse_state, q.x - p.x);
-    }
-
-    #[test]
-    fn test_phase_one_p_add_q_twice() {
-        let mut inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-        let mut inverses = vec![<G1Affine as AffineCurve>::BaseField::one(); 4 as usize];
-        let mut rng = ark_std::test_rng();
-        let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let p = G1Affine::from(p_prj);
-        let q = G1Affine::from(q_prj);
-
-        BucketMSM::<G1Affine>::batch_add_phase_one(&p, &q, 0, &mut inverse_state, &mut inverses);
-        BucketMSM::<G1Affine>::batch_add_phase_one(&p, &q, 0, &mut inverse_state, &mut inverses);
-        assert_eq!(inverses[0], q.x - p.x);
-        assert_eq!(inverse_state, (q.x - p.x) * (q.x - p.x));
-    }
-
-    #[test]
-    fn test_phase_two_zero_add_p() {
-        let mut inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-        let mut inverses = vec![<G1Affine as AffineCurve>::BaseField::one(); 4 as usize];
-        let mut rng = ark_std::test_rng();
-        let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let p = G1Affine::from(p_prj);
-        let mut acc = G1Affine::zero();
-        BucketMSM::<G1Affine>::batch_add_phase_two(
-            &mut acc,
-            &p,
-            0,
-            &mut inverse_state,
-            &mut inverses,
-        );
-        assert_eq!(acc, p);
-    }
-
-    #[test]
-    fn test_phase_two_p_add_neg() {
-        let mut inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-        let mut inverses = vec![<G1Affine as AffineCurve>::BaseField::one(); 4 as usize];
-
-        let mut rng = ark_std::test_rng();
-        let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let mut acc = G1Affine::from(p_prj);
-        let mut p = acc.clone();
-        p.y = -p.y;
-
-        BucketMSM::<G1Affine>::batch_add_phase_two(
-            &mut acc,
-            &p,
-            0,
-            &mut inverse_state,
-            &mut inverses,
-        );
-        assert_eq!(acc, G1Affine::zero());
-    }
-
-    #[test]
-    fn test_phase_two_p_add_q() {
-        let mut inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-        let mut inverses = vec![<G1Affine as AffineCurve>::BaseField::one(); 4 as usize];
-        let mut bucket_msm = BucketMSM::<G1Affine>::new(255u32, 15u32, 128u32, 4096u32);
-
-        let mut rng = ark_std::test_rng();
-        let acc_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let mut acc = G1Affine::from(acc_prj);
-        let mut p = acc.clone();
-        p.x = p.x + p.x;
-
-        bucket_msm.inverses[0] = (p.x - acc.x).inverse().unwrap();
-        BucketMSM::<G1Affine>::batch_add_phase_two(
-            &mut acc,
-            &p,
-            0,
-            &mut inverse_state,
-            &mut inverses,
-        );
-        assert_eq!(acc, G1Affine::from(acc_prj.add_mixed(&p)));
-    }
-
-    #[test]
-    fn test_phase_two_p_add_p() {
-        let mut inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-        let mut inverses = vec![<G1Affine as AffineCurve>::BaseField::one(); 4 as usize];
-
-        let mut rng = ark_std::test_rng();
-        let acc_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let mut acc = G1Affine::from(acc_prj);
-        let p = acc.clone();
-
-        inverses[0] = (p.y + p.y).inverse().unwrap();
-        BucketMSM::<G1Affine>::batch_add_phase_two(
-            &mut acc,
-            &p,
-            0,
-            &mut inverse_state,
-            &mut inverses,
-        );
-        assert_eq!(acc, G1Affine::from(acc_prj).add(p));
-    }
-
-    #[test]
-    fn test_batch_add() {
-        let mut inverse_state = <G1Affine as AffineCurve>::BaseField::one();
-        let mut inverses = vec![<G1Affine as AffineCurve>::BaseField::one(); 10 as usize];
-
-        let mut rng = ark_std::test_rng();
-        let mut buckets: Vec<G1Affine> = (0..10)
-            .map(|_| G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng)))
-            .collect();
-        let points: Vec<G1Affine> = (0..10)
-            .map(|_| G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng)))
-            .collect();
-
-        let tmp = buckets.clone();
-        for i in 0..10 {
-            BucketMSM::<G1Affine>::batch_add_phase_one(
-                &buckets[i],
-                &points[i],
-                i,
-                &mut inverse_state,
-                &mut inverses,
-            );
-        }
-        inverse_state = inverse_state.inverse().unwrap();
-        for i in (0..10).rev() {
-            BucketMSM::<G1Affine>::batch_add_phase_two(
-                &mut buckets[i],
-                &points[i],
-                i,
-                &mut inverse_state,
-                &mut inverses,
-            );
-        }
-
-        for i in 0..10 {
-            assert_eq!(buckets[i], tmp[i].add(points[i]));
-        }
     }
 }
