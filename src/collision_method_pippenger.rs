@@ -1,8 +1,9 @@
 use crate::{
     bucket_msm::BucketMSM,
-    types::{G1BigInt, G1Projective, G1_SCALAR_SIZE},
+    glv::{decompose},
+    types::{G1BigInt, G1Projective, G1_SCALAR_SIZE_GLV},
 };
-use ark_bls12_381::G1Affine;
+use ark_bls12_381::{G1Affine, Fr};
 use ark_ff::BigInteger;
 
 pub struct MSMRun {
@@ -43,13 +44,15 @@ fn msm_slice(scalar: G1BigInt, slices: &mut Vec<u32>, window_bits: u32) {
 
 pub fn quick_msm(run: &MSMRun) -> G1Projective {
     let mut bucket_msm: BucketMSM<G1Affine> = BucketMSM::new(
-        G1_SCALAR_SIZE,
+        G1_SCALAR_SIZE_GLV,
         run.window_bits,
         run.max_batch,
         run.max_collisions,
     );
-    let num_slices: u32 = (G1_SCALAR_SIZE + run.window_bits - 1) / run.window_bits;
-    let mut slices: Vec<u32> = vec![0; num_slices as usize];
+    let num_slices: u32 = (G1_SCALAR_SIZE_GLV + run.window_bits - 1) / run.window_bits;
+    // scalar = phi * lambda + normal
+    let mut phi_slices: Vec<u32> = vec![0; num_slices as usize];
+    let mut normal_slices: Vec<u32> = vec![0; num_slices as usize];
 
     let scalars_and_bases_iter = run
         .scalars
@@ -57,8 +60,10 @@ pub fn quick_msm(run: &MSMRun) -> G1Projective {
         .zip(&run.points)
         .filter(|(s, _)| !s.is_zero());
     scalars_and_bases_iter.for_each(|(&scalar, point)| {
-        msm_slice(scalar, &mut slices, run.window_bits);
-        bucket_msm.process_point_and_slices(&point, &slices);
+        let (phi, normal, is_neg_scalar, is_neg_normal) = decompose(&Fr::from(scalar));
+        msm_slice(phi.into(), &mut phi_slices, run.window_bits);
+        msm_slice(normal.into(), &mut normal_slices, run.window_bits);
+        bucket_msm.process_point_and_slices_glv(&point, &normal_slices, &phi_slices, is_neg_scalar, is_neg_normal);
     });
 
     bucket_msm.process_complete();

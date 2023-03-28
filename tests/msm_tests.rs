@@ -28,7 +28,6 @@ mod msm_tests {
         assert_eq!(baseline, opt);
     }
 
-/*
     #[test]
     fn test_msm_correctness_few_points_no_collision_c15() {
         let num_points = 2;
@@ -46,7 +45,7 @@ mod msm_tests {
         let opt = compute_msm_opt(&points, &scalars, 15);
         assert_eq!(baseline, opt);
     }
-*/
+/*
     #[test]
     fn test_msm_correctness_few_points_no_collision_c16() {
         let num_points = 2;
@@ -62,6 +61,7 @@ mod msm_tests {
         let opt = compute_msm_opt(&points, &scalars, 16);
         assert_eq!(baseline, opt);
     }
+*/
 
     #[test]
     fn test_msm_correctness_few_points_u32_all_collision() {
@@ -98,7 +98,6 @@ mod msm_tests {
         assert_eq!(baseline, opt);
     }
 
-/*
     #[test]
     fn test_msm_correctness_tremendous_points_c15() {
         let size = 1 << 10;
@@ -107,8 +106,8 @@ mod msm_tests {
         let opt = compute_msm_opt(&point_vec, &scalar_vec, 15);
         assert_eq!(baseline, opt);
     }
-*/
 
+/*
     #[test]
     fn test_msm_correctness_tremendous_points_c16() {
         let size = 1 << 10;
@@ -117,4 +116,5 @@ mod msm_tests {
         let opt = compute_msm_opt(&point_vec, &scalar_vec, 8);
         assert_eq!(baseline, opt);
     }
+*/
 }

@@ -24,8 +24,8 @@ pub fn get_opt_window_size(num_points: usize) -> usize {
         3
     } else {
         let mut ws = ln_without_floats(num_points) + 2;
-        if num_points >= (1 << 14) && num_points < (1 << 16) {
-            ws += 1;
+        if num_points >= (1 << 9) && num_points < (1 << 15) {
+            ws += 2;
         }
         ws
     }

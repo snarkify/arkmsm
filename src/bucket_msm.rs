@@ -2,7 +2,12 @@ use ark_bls12_381::G1Affine;
 use ark_ec::{AffineCurve, ProjectiveCurve};
 use ark_std::{Zero};
 
-use crate::{bitmap::Bitmap, types::G1Projective, batch_adder::BatchAdder};
+use crate::{
+    bitmap::Bitmap,
+    types::G1Projective,
+    batch_adder::BatchAdder,
+    glv::endomorphism
+};
 use crate::collision_state::CollisionState;
 
 const GROUP_SIZE_LOG2: usize = 6;
@@ -70,24 +75,84 @@ impl<G: AffineCurve> BucketMSM<G> {
         }
     }
 
+    pub fn process_point_and_slices_glv(&mut self, point: &G1Affine,
+        normal_slices: &Vec<u32>, phi_slices: &Vec<u32>,
+        is_neg_scalar: bool, is_neg_normal: bool) {
+        assert!(
+            self.num_windows as usize == normal_slices.len() && normal_slices.len() == phi_slices.len(),
+            "slice len check failed: normal_slices {}, phi_slices {}, num_windows {}",
+            normal_slices.len(), phi_slices.len(), self.num_windows
+        );
+
+        let mut p = *point; // copy
+
+        if is_neg_scalar {p.y = -p.y};
+        if is_neg_normal {p.y = -p.y};
+
+        self.cur_points[self.cur_points_cnt as usize] = p; // copy
+        self.cur_points_cnt += 1;
+        for win in 0..normal_slices.len() {
+            if (normal_slices[win] as i32) > 0 {
+                let bucket_id = (win << self.bucket_bits) as u32 + normal_slices[win] - 1; // skip slice == 0
+                self._process_slices(bucket_id, &p);
+            }
+        }
+
+        p.y = -p.y;
+
+        self.cur_points[self.cur_points_cnt as usize] = p; // copy
+        self.cur_points_cnt += 1;
+        for win in 0..normal_slices.len() {
+            if (normal_slices[win] as i32) < 0 {
+                let slice = normal_slices[win] & 0x7FFFFFFF;
+                if slice > 0 {
+                    let bucket_id = (win << self.bucket_bits) as u32 + slice - 1; // skip slice == 0
+                    self._process_slices(bucket_id, &p);
+                }
+            }
+        }
+
+        // process phi slices
+        p.y = -p.y;
+        if is_neg_normal {p.y = -p.y;}
+        endomorphism(&mut p);
+
+        self.cur_points[self.cur_points_cnt as usize] = p.clone(); // copy
+        self.cur_points_cnt += 1;
+        for win in 0..phi_slices.len() {
+            if (phi_slices[win] as i32) > 0 {
+                let bucket_id = (win << self.bucket_bits) as u32 + phi_slices[win] - 1; // skip slice == 0
+                self._process_slices(bucket_id, &p);
+            }
+        }
+
+        p.y = -p.y;
+
+        self.cur_points[self.cur_points_cnt as usize] = p.clone(); // copy
+        self.cur_points_cnt += 1;
+        for win in 0..phi_slices.len() {
+            if (phi_slices[win] as i32) < 0 {
+                let slice = phi_slices[win] & 0x7FFFFFFF;
+                if slice > 0 {
+                    let bucket_id = (win << self.bucket_bits) as u32 + slice - 1; // skip slice == 0
+                    self._process_slices(bucket_id, &p);
+                }
+            }
+        }
+    }
+
     pub fn process_point_and_slices(&mut self, point: &G1Affine, slices: &Vec<u32>) {
         assert!(
             self.num_windows as usize == slices.len(),
             "slices.len() {} should equal num_windows {}",
-            slices.len(),
-            self.num_windows
+            slices.len(), self.num_windows
         );
-
-        // print!("point count: {}, num_windows {}, slices.len() {}\n", self.cur_points_cnt, self.num_windows, slices.len());
-        // print!("slices {:?}\n", slices);
 
         self.cur_points[self.cur_points_cnt as usize] = *point; // copy
         self.cur_points_cnt += 1;
         for win in 0..slices.len() {
             if (slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + slices[win] - 1; // skip slice == 0
-
-                // print!("win: {}, win shift: {}, slice: {}, bucket_id {}\n", win, (win << self.bucket_bits), slices[win], bucket_id);
                 self._process_slices(bucket_id, point);
             }
         }
@@ -95,15 +160,15 @@ impl<G: AffineCurve> BucketMSM<G> {
         let mut neg_p = *point;
         neg_p.y = -neg_p.y;
 
-        self.cur_points[self.cur_points_cnt as usize] = neg_p; // copy
+        let mut cur_point = &mut self.cur_points[self.cur_points_cnt as usize];
+        *cur_point = *point;
+        cur_point.y = -cur_point.y;
         self.cur_points_cnt += 1;
         for win in 0..slices.len() {
             if (slices[win] as i32) < 0 {
                 let slice = slices[win] & 0x7FFFFFFF;
                 if slice > 0 {
                     let bucket_id = (win << self.bucket_bits) as u32 + slice - 1; // skip slice == 0
-
-                    // print!("win: {}, win shift: {}, slice: {}, bucket_id {}\n", win, (win << self.bucket_bits), slices[win], bucket_id);
                     self._process_slices(bucket_id, &neg_p);
                 }
             }
