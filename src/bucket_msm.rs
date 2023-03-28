@@ -2,7 +2,8 @@ use ark_bls12_381::G1Affine;
 use ark_ec::{AffineCurve, ProjectiveCurve};
 use ark_std::{Zero};
 
-use crate::{bitmap::Bitmap, list, types::G1Projective, batch_adder::BatchAdder};
+use crate::{bitmap::Bitmap, types::G1Projective, batch_adder::BatchAdder};
+use crate::collision_state::CollisionState;
 
 const GROUP_SIZE_LOG2: usize = 6;
 const GROUP_SIZE: usize = 1 << GROUP_SIZE_LOG2;
@@ -26,21 +27,10 @@ pub struct BucketMSM<G: AffineCurve> {
     batch_adder: BatchAdder,
 
     // collision and pending slices state
-    //
     // a collision occurs when adding a point to bucket and found is already a
     // point in the same batch has been assigned to the same bucket
     bitmap: Bitmap,
-    collision_cnt: u32,
-    max_collision_cnt: u32, // max collisions allowed per batch
-
-    // worst-case: all slices, except for the first slice, from the
-    // unprocessed_list were added to the processing_list, and a new set of
-    // collisions occur, causing the unprocessed_list to be filled again. To
-    // accommodate both lists, we must allocate 2x max_collision_cnt
-    collision_list_nodes: Vec<u64>, // u32 encoded as <point index to cur_points, next> pair, size 2 x max_collision_cnt
-    available_list: u32,            // free entries in collision_list_nodes
-    processing_list: u32,           // entries to be processed in the next batch
-    unprocessed_list: u32,          // pending processing entries
+    collision_state: CollisionState,
 }
 
 impl<G: AffineCurve> BucketMSM<G> {
@@ -56,14 +46,6 @@ impl<G: AffineCurve> BucketMSM<G> {
         let bucket_size = num_windows << bucket_bits;
         // size of batch_adder will be the max of batch_size and num_windows * groups per window
         let batch_adder_size = std::cmp::max(batch_size, bucket_size >> GROUP_SIZE_LOG2);
-
-        // link all the collision_list_nodes into a list
-        let max_size = max_collision_cnt * 2;
-        let mut _collision_list_nodes = vec![0u64; max_size as usize];
-        for i in 0..(max_size - 1) {
-            _collision_list_nodes[i as usize] = i as u64 + 1;
-        }
-        _collision_list_nodes[(max_size - 1) as usize] = list::NIL as u64;
 
         BucketMSM {
             num_windows,
@@ -83,13 +65,8 @@ impl<G: AffineCurve> BucketMSM<G> {
             batch_adder: BatchAdder::new(batch_adder_size as usize),
 
             bitmap: Bitmap::new(bucket_size as usize / 32),
-            collision_cnt: 0,
-            max_collision_cnt,
 
-            collision_list_nodes: _collision_list_nodes,
-            processing_list: list::make_list(list::NIL, list::NIL),
-            unprocessed_list: list::make_list(list::NIL, list::NIL),
-            available_list: list::make_list(0, max_size - 1),
+            collision_state: CollisionState::new(max_collision_cnt as usize),
         }
     }
 
@@ -135,7 +112,7 @@ impl<G: AffineCurve> BucketMSM<G> {
 
     pub fn process_complete(&mut self) {
         self._process_batch();
-        while !list::is_empty(self.unprocessed_list) || !list::is_empty(self.processing_list) {
+        while self.collision_state.needs_processing() {
             self._process_batch();
         }
     }
@@ -153,29 +130,15 @@ impl<G: AffineCurve> BucketMSM<G> {
             self.cur_batch_cnt += 1;
         } else {
             // if collision, add point to unprocessed_list
-            // free_slot index both collision_list_nodes and cur_points+max_collision_cnt
-            //
-            // processed_list:      ------------------------------->|
-            // collision_list_nodes:            [<bucket_id, next>, <bucket_id, next>, ...]
             // cur_points: [ max_batch_cnt area |  point1,           point, ...           ]
-            let free_node_index = list::pop(&self.collision_list_nodes, &mut self.available_list);
-            // print!("bucket_id {}, free_node_index {}, collision_cnt {}, max_collision_cnt {}\n", bucket_id, free_node_index, self.collision_cnt, self.max_collision_cnt);
-            assert!(free_node_index < 2 * self.max_collision_cnt);
-            self.collision_list_nodes[free_node_index as usize] =
-                ((bucket_id as u64) << 14) + 0x3FFF;
-            list::enqueue(
-                &mut self.collision_list_nodes,
-                &mut self.unprocessed_list,
-                free_node_index,
-            );
-            self.collision_cnt += 1;
-
+            let collision_index = self.collision_state.add_unprocessed(bucket_id);
             // cur_points: [max_batch_cnt points | 2*max_collisions points]
-            self.cur_points[(self.max_batch_cnt + free_node_index) as usize] = *point; // copy
+            self.cur_points[(self.max_batch_cnt + collision_index) as usize] = *point; // copy
             // print!("Collision: bucket_id {}, point_idx {}\n", bucket_id, free_node_index);
         }
 
-        if self.collision_cnt >= self.max_collision_cnt || self.cur_batch_cnt >= self.max_batch_cnt
+        if self.collision_state.reaches_max_collision_count() ||
+            self.cur_batch_cnt >= self.max_batch_cnt
         {
             self._process_batch();
         }
@@ -196,16 +159,15 @@ impl<G: AffineCurve> BucketMSM<G> {
             self.batch_adder.batch_add_phase_two(acc, point, i as usize);
             // print!{"phase_two result: {}\n", acc};
         }
+        // points in processing state has been processed, slots can be freed
+        self.collision_state.free_processing();
 
-        // process collision
+        // process collision if we have more unprocessed points
+        if !self.collision_state.needs_processing() {
+            return;
+        }
+
         self.bitmap.clear();
-
-        list::append_all(
-            &mut self.collision_list_nodes,
-            &mut self.available_list,
-            &mut self.processing_list,
-        );
-
         // reset inverse_state
         self.batch_adder.reset();
 
@@ -214,53 +176,42 @@ impl<G: AffineCurve> BucketMSM<G> {
         self.cur_points_cnt = 1;
 
         self.cur_batch_cnt = 0;
-        self.collision_cnt = 0;
-
         // Process collision points
         // iterate over the unprocessed list
         //   - add to processing if no collision
         //   - add back to unprocessed if collision again
-        let mut cur_node_idx = list::get_head(self.unprocessed_list);
-        list::clear(&mut self.unprocessed_list);
-        while cur_node_idx != 0x3FFF {
-            // <bucket_id, next entry index> pair
-            // cur_node_idx corresponding to a bucket_id in
-            // collision_list_nodes and a point in cur_points+max_batch_cnt
-            let cur_node = self.collision_list_nodes[cur_node_idx as usize];
-            let bucket_id = list::get_entry_payload(cur_node);
+        let tail_idx = self.collision_state.get_unprocessed_tail();
+        let mut cur_entry_idx = self.collision_state.dequeue_unprocessed();
+        loop {
+            let bucket_id = self.collision_state.get_entry_data(cur_entry_idx);
 
             if !self.bitmap.test_and_set(bucket_id) {
                 // print!("no collision\n");
                 // if no collision get point from the collision area in cur_points
-                let point = &self.cur_points[(self.max_batch_cnt + cur_node_idx) as usize];
+                let point = &self.cur_points[(self.max_batch_cnt + cur_entry_idx) as usize];
 
                 let acc = &self.buckets[bucket_id as usize];
                 // space after max_batch_cnt for collisioned points
-                let point_idx = self.max_batch_cnt + cur_node_idx;
+                let point_idx = self.max_batch_cnt + cur_entry_idx;
                 // print!("_process_batch: bucket_id {}, point index: {}, batch index {}\n", bucket_id, point_idx, self.cur_batch_cnt);
                 self.batch_adder.batch_add_phase_one(acc, point, self.cur_batch_cnt as usize);
 
                 // print!("bucket_id {}, point idx {}\n", bucket_id, cur_node_idx);
-
                 self.cur_bkt_pnt_pairs[self.cur_batch_cnt as usize] =
                     ((bucket_id as u64) << 14) + point_idx as u64;
                 self.cur_batch_cnt += 1;
-
-                list::enqueue(
-                    &mut self.collision_list_nodes,
-                    &mut self.processing_list,
-                    cur_node_idx,
-                );
+                self.collision_state.mark_entry_processing(cur_entry_idx);
             } else {
                 // print!("collision\n");
-                self.collision_cnt += 1;
-                list::enqueue(
-                    &mut self.collision_list_nodes,
-                    &mut self.unprocessed_list,
-                    cur_node_idx,
-                );
+                self.collision_state.mark_entry_unprocessed(cur_entry_idx);
             }
-            cur_node_idx = list::get_next(cur_node);
+
+            if cur_entry_idx == tail_idx {
+                // reached to the original tail of the queue, stop
+                break;
+            } else {
+                cur_entry_idx = self.collision_state.dequeue_unprocessed();
+            }
         }
     }
 
