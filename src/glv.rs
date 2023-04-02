@@ -35,9 +35,8 @@ const INV1: u128 = 0x7c6becf1e01faadd; // 2**256 // lambda - [64, 127] bit
 const INV0: u128 = 0x63f6e522f6cfee30; // 2**256 // lambda - [0, 63] bit
 const MASK64: u128 = 0xffffffffffffffff;
 
-pub fn decompose(scalar: &G1ScalarField) -> (G1ScalarField, G1ScalarField, bool, bool) {
-    // TODO: only preprocessing if scalar % window_size is 0
-    let (s0, s1, s2, s3, is_neg_scalar) = glv_preprocess_scalar(scalar);
+pub fn decompose(scalar: &G1ScalarField, window_bits: u32) -> (G1ScalarField, G1ScalarField, bool, bool) {
+    let (s0, s1, s2, s3, is_neg_scalar) = glv_preprocess_scalar(scalar, window_bits);
 
     // 255 bits in four 64b limbs
     // let s2: u128 = scalar.into_repr().as_ref()[2] as u128; // 64 bit
@@ -98,7 +97,10 @@ pub fn decompose(scalar: &G1ScalarField) -> (G1ScalarField, G1ScalarField, bool,
     quotient1 += quotient0 >> 64;
     quotient0 &= MASK64;
 
-    let is_neg_remainder = glv_post_processing(&mut quotient0, &mut quotient1, &mut r0, &mut r1);
+    let mut is_neg_remainder = false;
+    if 128 % window_bits == 0 {
+        is_neg_remainder = glv_post_processing(&mut quotient0, &mut quotient1, &mut r0, &mut r1);
+    }
 
     (G1ScalarField::from(BigInteger256([quotient0 as u64, quotient1 as u64, 0, 0])), 
      G1ScalarField::from(BigInteger256([r0, r1, 0, 0])),
@@ -123,34 +125,37 @@ const R0: i128 = 0xffffffff00000001;
 
 // use sP = (N - s)(-P) to make scalar smaller, which ensures scalar MSB is not
 // set, and the decomposed phi has MSB unset
-fn glv_preprocess_scalar(scalar: &G1ScalarField) -> (u128, u128, u128, u128, bool) {
+fn glv_preprocess_scalar(scalar: &G1ScalarField, window_bits: u32) -> (u128, u128, u128, u128, bool) {
     let mut s = [
         scalar.into_repr().as_ref()[0],
         scalar.into_repr().as_ref()[1],
         scalar.into_repr().as_ref()[2],
         scalar.into_repr().as_ref()[3],
     ];
+
     let mut is_neg_scalar = false;
-    if s[3] >= 0x3FFFFFFFFFFFFFFF {
-        is_neg_scalar = true;
+    if 128 % window_bits == 0 {
+        if s[3] >= 0x3FFFFFFFFFFFFFFF {
+            is_neg_scalar = true;
 
-        let mut carry: i128 = 0;
-        carry = carry + R0 - s[0] as i128;
-        s[0] = (carry as u128 & MASK64) as u64;
-        carry = carry >> 64;
+            let mut carry: i128 = 0;
+            carry = carry + R0 - s[0] as i128;
+            s[0] = (carry as u128 & MASK64) as u64;
+            carry = carry >> 64;
 
-        carry = carry + R1 - s[1] as i128;
-        s[1] = (carry as u128 & MASK64) as u64;
-        carry = carry >> 64;
+            carry = carry + R1 - s[1] as i128;
+            s[1] = (carry as u128 & MASK64) as u64;
+            carry = carry >> 64;
 
-        carry = carry + R2 - s[2] as i128;
-        s[2] = (carry as u128 & MASK64) as u64;
-        carry = carry >> 64;
+            carry = carry + R2 - s[2] as i128;
+            s[2] = (carry as u128 & MASK64) as u64;
+            carry = carry >> 64;
 
-        carry = carry + R3 - s[3] as i128;
-        s[3] = (carry as u128 & MASK64) as u64;
+            carry = carry + R3 - s[3] as i128;
+            s[3] = (carry as u128 & MASK64) as u64;
+        }
+        assert!(s[3] < 0x3FFFFFFFFFFFFFFF);
     }
-    assert!(s[3] < 0x3FFFFFFFFFFFFFFF);
 
     ( s[0] as u128,
       s[1] as u128,

@@ -60,7 +60,7 @@ pub fn quick_msm(run: &MSMRun) -> G1Projective {
         .zip(&run.points)
         .filter(|(s, _)| !s.is_zero());
     scalars_and_bases_iter.for_each(|(&scalar, point)| {
-        let (phi, normal, is_neg_scalar, is_neg_normal) = decompose(&Fr::from(scalar));
+        let (phi, normal, is_neg_scalar, is_neg_normal) = decompose(&Fr::from(scalar), run.window_bits);
         msm_slice(phi.into(), &mut phi_slices, run.window_bits);
         msm_slice(normal.into(), &mut normal_slices, run.window_bits);
         bucket_msm.process_point_and_slices_glv(&point, &normal_slices, &phi_slices, is_neg_scalar, is_neg_normal);

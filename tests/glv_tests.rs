@@ -9,7 +9,7 @@ mod glv_tests {
     #[test]
     fn test_decompose_1() {
         let s: G1ScalarField = Fr::from(1);
-        let (q, r, _, _) = decompose(&s);
+        let (q, r, _, _) = decompose(&s, 16);
 
         assert_eq!(q, Fr::from(0));
         assert_eq!(r, Fr::from(1));
@@ -23,7 +23,7 @@ mod glv_tests {
             0x0000000000000000,
             0x0000000000000000,
         ]));
-        let (q, r, _, _) = decompose(&s);
+        let (q, r, _, _) = decompose(&s, 16);
 
         assert_eq!(q, Fr::from(1));
         assert_eq!(r, Fr::from(1));
@@ -33,7 +33,7 @@ mod glv_tests {
     fn test_decompose_random() {
         let mut rng = ark_std::test_rng();
         let s = Fr::rand(&mut rng);
-        let (q, r, _, _) = decompose(&s);
+        let (q, r, _, _) = decompose(&s, 16);
 
         let lambda: u128 = 0xac45a4010001a40200000000ffffffff;
         let mut ss: BigUint = s.into();

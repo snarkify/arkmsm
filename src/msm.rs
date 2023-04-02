@@ -27,6 +27,9 @@ pub fn get_opt_window_size(num_points: usize) -> usize {
         if num_points >= (1 << 9) && num_points < (1 << 15) {
             ws += 2;
         }
+        if num_points >= (1 << 18) {
+            ws -= 1;
+        }
         ws
     }
 }
