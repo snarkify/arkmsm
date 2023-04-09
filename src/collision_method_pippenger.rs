@@ -41,7 +41,7 @@ pub fn multi_scalar_mul(
     max_batch: u32,
     max_collisions: u32
 ) -> G1Projective {
-    let mut bucket_msm: BucketMSM<G1Affine> = BucketMSM::new(
+    let mut bucket_msm = BucketMSM::new(
         G1_SCALAR_SIZE_GLV,
         window_bits,
         max_batch,

@@ -1,5 +1,5 @@
 use ark_bls12_381::G1Affine;
-use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ec::{ProjectiveCurve};
 use ark_std::{Zero};
 
 use crate::{
@@ -13,13 +13,11 @@ use crate::collision_state::CollisionState;
 const GROUP_SIZE_LOG2: usize = 6;
 const GROUP_SIZE: usize = 1 << GROUP_SIZE_LOG2;
 
-pub struct BucketMSM<G: AffineCurve> {
+pub struct BucketMSM {
     num_windows: u32,
     window_bits: u32,
     bucket_bits: u32,
-
     buckets: Vec<G1Affine>, // size (num_windows << window_bits) * 2
-    results: G,             // output
 
     // current batch state
     cur_points: Vec<G1Affine>, // points of current batch, size batch_size + 2 x max_collision_cnt
@@ -38,13 +36,13 @@ pub struct BucketMSM<G: AffineCurve> {
     collision_state: CollisionState,
 }
 
-impl<G: AffineCurve> BucketMSM<G> {
+impl BucketMSM {
     pub fn new(
         scalar_bits: u32,
         window_bits: u32,
         max_batch_cnt: u32,     // default: 4096
         max_collision_cnt: u32, // default: 128
-    ) -> BucketMSM<G> {
+    ) -> BucketMSM {
         let num_windows = (scalar_bits + window_bits - 1) / window_bits;
         let batch_size = std::cmp::max(8192, max_batch_cnt);
         let bucket_bits = window_bits - 1; // half buckets needed because of signed-bucket-index
@@ -56,9 +54,7 @@ impl<G: AffineCurve> BucketMSM<G> {
             num_windows,
             window_bits,
             bucket_bits,
-
             buckets: vec![G1Affine::zero(); bucket_size as usize],
-            results: G::zero(),
 
             // 2 * max_collision_cnt for unprocessed and processing
             cur_points: vec![G1Affine::zero(); (batch_size + 2 * max_collision_cnt) as usize],
@@ -75,9 +71,12 @@ impl<G: AffineCurve> BucketMSM<G> {
         }
     }
 
-    pub fn process_point_and_slices_glv(&mut self, point: &G1Affine,
-        normal_slices: &Vec<u32>, phi_slices: &Vec<u32>,
-        is_neg_scalar: bool, is_neg_normal: bool) {
+    pub fn process_point_and_slices_glv(
+            &mut self, point: &G1Affine,
+            normal_slices: &Vec<u32>,
+            phi_slices: &Vec<u32>,
+            is_neg_scalar: bool,
+            is_neg_normal: bool) {
         assert!(
             self.num_windows as usize == normal_slices.len() && normal_slices.len() == phi_slices.len(),
             "slice len check failed: normal_slices {}, phi_slices {}, num_windows {}",
@@ -89,24 +88,24 @@ impl<G: AffineCurve> BucketMSM<G> {
         if is_neg_scalar {p.y = -p.y};
         if is_neg_normal {p.y = -p.y};
 
-        self.cur_points[self.cur_points_cnt as usize] = p; // copy
+        self.cur_points[self.cur_points_cnt as usize] = p.clone();
         self.cur_points_cnt += 1;
         for win in 0..normal_slices.len() {
             if (normal_slices[win] as i32) > 0 {
-                let bucket_id = (win << self.bucket_bits) as u32 + normal_slices[win] - 1; // skip slice == 0
+                let bucket_id = (win << self.bucket_bits) as u32 + normal_slices[win] - 1;
                 self._process_slices(bucket_id, &p);
             }
         }
 
         p.y = -p.y;
 
-        self.cur_points[self.cur_points_cnt as usize] = p; // copy
+        self.cur_points[self.cur_points_cnt as usize] = p.clone();
         self.cur_points_cnt += 1;
         for win in 0..normal_slices.len() {
             if (normal_slices[win] as i32) < 0 {
                 let slice = normal_slices[win] & 0x7FFFFFFF;
                 if slice > 0 {
-                    let bucket_id = (win << self.bucket_bits) as u32 + slice - 1; // skip slice == 0
+                    let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
                     self._process_slices(bucket_id, &p);
                 }
             }
@@ -117,30 +116,31 @@ impl<G: AffineCurve> BucketMSM<G> {
         if is_neg_normal {p.y = -p.y;}
         endomorphism(&mut p);
 
-        self.cur_points[self.cur_points_cnt as usize] = p.clone(); // copy
+        self.cur_points[self.cur_points_cnt as usize] = p.clone();
         self.cur_points_cnt += 1;
         for win in 0..phi_slices.len() {
             if (phi_slices[win] as i32) > 0 {
-                let bucket_id = (win << self.bucket_bits) as u32 + phi_slices[win] - 1; // skip slice == 0
+                let bucket_id = (win << self.bucket_bits) as u32 + phi_slices[win] - 1;
                 self._process_slices(bucket_id, &p);
             }
         }
 
         p.y = -p.y;
 
-        self.cur_points[self.cur_points_cnt as usize] = p.clone(); // copy
+        self.cur_points[self.cur_points_cnt as usize] = p.clone();
         self.cur_points_cnt += 1;
         for win in 0..phi_slices.len() {
             if (phi_slices[win] as i32) < 0 {
                 let slice = phi_slices[win] & 0x7FFFFFFF;
                 if slice > 0 {
-                    let bucket_id = (win << self.bucket_bits) as u32 + slice - 1; // skip slice == 0
+                    let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
                     self._process_slices(bucket_id, &p);
                 }
             }
         }
     }
 
+    #[allow(dead_code)]
     pub fn process_point_and_slices(&mut self, point: &G1Affine, slices: &Vec<u32>) {
         assert!(
             self.num_windows as usize == slices.len(),
@@ -357,11 +357,12 @@ mod bucket_msm_tests {
     use super::*;
     use ark_bls12_381::G1Affine;
     use ark_std::UniformRand;
+    use ark_ec::AffineCurve;
 
     #[test]
     fn test_process_point_and_slices_deal_two_points() {
         let window_bits = 15u32;
-        let mut bucket_msm = BucketMSM::<G1Affine>::new(30u32, window_bits, 128u32, 4096u32);
+        let mut bucket_msm = BucketMSM::new(30u32, window_bits, 128u32, 4096u32);
         let mut rng = ark_std::test_rng();
         let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
@@ -379,7 +380,7 @@ mod bucket_msm_tests {
     #[test]
     fn test_process_point_and_slices_deal_three_points() {
         let window_bits = 15u32;
-        let mut bucket_msm = BucketMSM::<G1Affine>::new(45u32, window_bits, 128u32, 4096u32);
+        let mut bucket_msm = BucketMSM::new(45u32, window_bits, 128u32, 4096u32);
         let mut rng = ark_std::test_rng();
         let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
@@ -405,7 +406,7 @@ mod bucket_msm_tests {
     #[test]
     fn test_process_point_and_slices_glv_deal_two_points() {
         let window_bits = 15u32;
-        let mut bucket_msm = BucketMSM::<G1Affine>::new(30u32, window_bits, 128u32, 4096u32);
+        let mut bucket_msm = BucketMSM::new(30u32, window_bits, 128u32, 4096u32);
         let mut rng = ark_std::test_rng();
         let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
