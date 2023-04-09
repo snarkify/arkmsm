@@ -6,14 +6,6 @@ use crate::{
 use ark_bls12_381::{G1Affine, Fr};
 use ark_ff::BigInteger;
 
-pub struct MSMRun {
-    pub points: Vec<G1Affine>,
-    pub scalars: Vec<G1BigInt>,
-    pub window_bits: u32,
-    pub max_batch: u32,
-    pub max_collisions: u32,
-}
-
 fn msm_slice(scalar: G1BigInt, slices: &mut Vec<u32>, window_bits: u32) {
     assert!(window_bits <= 31); // reserve one bit for marking signed slices
     let mut temp = scalar;
@@ -42,33 +34,39 @@ fn msm_slice(scalar: G1BigInt, slices: &mut Vec<u32>, window_bits: u32) {
     );
 }
 
-pub fn quick_msm(run: &MSMRun) -> G1Projective {
+pub fn multi_scalar_mul(
+    points: &Vec<G1Affine>,
+    scalars: &Vec<G1BigInt>,
+    window_bits: u32,
+    max_batch: u32,
+    max_collisions: u32
+) -> G1Projective {
     let mut bucket_msm: BucketMSM<G1Affine> = BucketMSM::new(
         G1_SCALAR_SIZE_GLV,
-        run.window_bits,
-        run.max_batch,
-        run.max_collisions,
+        window_bits,
+        max_batch,
+        max_collisions,
     );
-    let num_slices: u32 = (G1_SCALAR_SIZE_GLV + run.window_bits - 1) / run.window_bits;
+    let num_slices: u32 = (G1_SCALAR_SIZE_GLV + window_bits - 1) / window_bits;
     // scalar = phi * lambda + normal
     let mut phi_slices: Vec<u32> = vec![0; num_slices as usize];
     let mut normal_slices: Vec<u32> = vec![0; num_slices as usize];
 
-    let scalars_and_bases_iter = run
-        .scalars
+    let scalars_and_bases_iter = scalars
         .iter()
-        .zip(&run.points)
+        .zip(points)
         .filter(|(s, _)| !s.is_zero());
     scalars_and_bases_iter.for_each(|(&scalar, point)| {
-        let (phi, normal, is_neg_scalar, is_neg_normal) = decompose(&Fr::from(scalar), run.window_bits);
-        msm_slice(phi.into(), &mut phi_slices, run.window_bits);
-        msm_slice(normal.into(), &mut normal_slices, run.window_bits);
+        let (phi, normal, is_neg_scalar, is_neg_normal) = decompose(&Fr::from(scalar), window_bits);
+        msm_slice(phi.into(), &mut phi_slices, window_bits);
+        msm_slice(normal.into(), &mut normal_slices, window_bits);
         bucket_msm.process_point_and_slices_glv(&point, &normal_slices, &phi_slices, is_neg_scalar, is_neg_normal);
     });
 
     bucket_msm.process_complete();
     return bucket_msm.batch_reduce();
 }
+
 
 #[cfg(test)]
 mod collision_method_pippenger_tests {

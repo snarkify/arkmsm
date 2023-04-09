@@ -1,16 +1,25 @@
+#[path = "../benches/utils/bench_helper.rs"]
+mod bench_helper;
+
+use bench_helper::{get_opt_window_size, compute_msm_baseline, compute_msm_opt};
 use ark_bls12_381::G1Affine;
 use ark_ec::AffineCurve;
 use ark_ff::PrimeField;
 use ark_msm::{
-    msm::{compute_msm_baseline, compute_msm_opt},
     utils::generate_msm_inputs,
 };
 
 #[cfg(test)]
-mod msm_tests {
+mod bench_helper_test {
     use super::*;
     use ark_msm::types::G1BigInt;
     use ark_std::UniformRand;
+
+    #[test]
+    fn test_get_opt_window_size() {
+        assert_eq!(get_opt_window_size(1), 3);
+        assert_eq!(get_opt_window_size(1 << 10), 10);
+    }
 
     #[test]
     fn test_msm_correctness_few_points_no_collision_c14() {

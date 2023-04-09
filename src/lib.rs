@@ -1,4 +1,3 @@
-pub mod msm;
 pub mod utils;
 
 pub mod bitmap;
