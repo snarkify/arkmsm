@@ -401,4 +401,28 @@ mod bucket_msm_tests {
         assert_eq!(bucket_msm.buckets[3 + (2 << bucket_msm.bucket_bits)], p + q);
         assert_eq!(bucket_msm.buckets[4 + (2 << bucket_msm.bucket_bits)], r);
     }
+
+    #[test]
+    fn test_process_point_and_slices_glv_deal_two_points() {
+        let window_bits = 15u32;
+        let mut bucket_msm = BucketMSM::<G1Affine>::new(30u32, window_bits, 128u32, 4096u32);
+        let mut rng = ark_std::test_rng();
+        let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
+        let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
+        let mut p = G1Affine::from(p_prj);
+        let mut q = G1Affine::from(q_prj);
+
+        bucket_msm.process_point_and_slices_glv(&p, &vec![1u32, 3u32], &vec![4u32, 6u32], false, false);
+        bucket_msm.process_point_and_slices_glv(&q, &vec![2u32, 3u32], &vec![5u32, 6u32], false, false);
+        bucket_msm.process_complete();
+        assert_eq!(bucket_msm.buckets[0], p);
+        assert_eq!(bucket_msm.buckets[1], q);
+        assert_eq!(bucket_msm.buckets[2 + (1 << bucket_msm.bucket_bits)], p + q);
+
+        endomorphism(&mut p);
+        endomorphism(&mut q);
+        assert_eq!(bucket_msm.buckets[3], p);
+        assert_eq!(bucket_msm.buckets[4], q);
+        assert_eq!(bucket_msm.buckets[5 + (1 << bucket_msm.bucket_bits)], p + q);
+    }
 }
