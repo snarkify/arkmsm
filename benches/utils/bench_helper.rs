@@ -1,10 +1,10 @@
 use ark_bls12_381::G1Affine;
-use ark_ec::{AffineCurve, ProjectiveCurve, msm::VariableBaseMSM};
+use ark_ec::{AffineCurve, ProjectiveCurve, msm::VariableBaseMSM as BaselineVariableBaseMSM};
 use ark_ff::{PrimeField};
 use ark_std::vec::Vec;
 use ark_msm::{
     types::{G1BigInt, G1Projective},
-    collision_method_pippenger::multi_scalar_mul
+    msm::VariableBaseMSM
 };
 
 // The result of this function is only approximately `ln(a)`
@@ -34,13 +34,13 @@ pub fn compute_msm_opt(
     scalar: &Vec<G1BigInt>,
     window_bits: u32,
 ) -> G1Projective {
-    return multi_scalar_mul(
+    VariableBaseMSM::multi_scalar_mul_custom(
         &point.to_vec(),
         &scalar.to_vec(),
         window_bits,
         2048,
         256
-    );
+    )
 }
 
 pub fn compute_msm_baseline<A>(
@@ -50,5 +50,5 @@ pub fn compute_msm_baseline<A>(
 where
     A: AffineCurve,
 {
-    VariableBaseMSM::multi_scalar_mul(point_vec.as_slice(), scalar_vec.as_slice())
+    BaselineVariableBaseMSM::multi_scalar_mul(point_vec.as_slice(), scalar_vec.as_slice())
 }
