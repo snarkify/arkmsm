@@ -1,24 +1,28 @@
-#[path = "../benches/utils/bench_helper.rs"]
-mod bench_helper;
-
-use bench_helper::{get_opt_window_size, compute_msm_baseline, compute_msm_opt};
 use ark_bls12_381::G1Affine;
 use ark_ec::AffineCurve;
 use ark_ff::PrimeField;
 use ark_msm::{
     utils::generate_msm_inputs,
+    msm::VariableBaseMSM
 };
+use ark_ec::msm::VariableBaseMSM as BaselineVariableBaseMSM;
 
 #[cfg(test)]
-mod bench_helper_test {
+mod msm_test {
     use super::*;
     use ark_msm::types::G1BigInt;
     use ark_std::UniformRand;
 
-    #[test]
-    fn test_get_opt_window_size() {
-        assert_eq!(get_opt_window_size(1), 3);
-        assert_eq!(get_opt_window_size(1 << 10), 10);
+    fn verify_correctness(points: &[G1Affine], scalars: &[G1BigInt], window_size: u32) {
+        let baseline = BaselineVariableBaseMSM::multi_scalar_mul(&points, &scalars);
+        let opt = VariableBaseMSM::multi_scalar_mul_custom(
+            &points,
+            &scalars,
+            window_size,
+            2048,
+            256
+        );
+        assert_eq!(baseline, opt);
     }
 
     #[test]
@@ -32,9 +36,7 @@ mod bench_helper_test {
             scalars.push(<G1Affine as AffineCurve>::ScalarField::rand(&mut rng).into_repr());
         }
 
-        let baseline = compute_msm_baseline::<G1Affine>(&points, &scalars);
-        let opt = compute_msm_opt(&points, &scalars, 14);
-        assert_eq!(baseline, opt);
+        verify_correctness(&points, &scalars, 14);
     }
 
     #[test]
@@ -50,11 +52,9 @@ mod bench_helper_test {
             scalars.push(<G1Affine as AffineCurve>::ScalarField::rand(&mut rng).into_repr());
         }
 
-        let baseline = compute_msm_baseline::<G1Affine>(&points, &scalars);
-        let opt = compute_msm_opt(&points, &scalars, 15);
-        assert_eq!(baseline, opt);
+        verify_correctness(&points, &scalars, 15);
     }
-/*
+
     #[test]
     fn test_msm_correctness_few_points_no_collision_c16() {
         let num_points = 2;
@@ -66,11 +66,8 @@ mod bench_helper_test {
             scalars.push(<G1Affine as AffineCurve>::ScalarField::rand(&mut rng).into_repr());
         }
 
-        let baseline = compute_msm_baseline::<G1Affine>(&points, &scalars);
-        let opt = compute_msm_opt(&points, &scalars, 16);
-        assert_eq!(baseline, opt);
+        verify_correctness(&points, &scalars, 16);
     }
-*/
 
     #[test]
     fn test_msm_correctness_few_points_u32_all_collision() {
@@ -84,9 +81,7 @@ mod bench_helper_test {
         }
         let scalars: Vec<_> = vec![G1BigInt::from(0xFFFFFFFF); num_points];
 
-        let baseline = compute_msm_baseline::<G1Affine>(&points, &scalars);
-        let opt = compute_msm_opt(&points, &scalars, 16);
-        assert_eq!(baseline, opt);
+        verify_correctness(&points, &scalars, 14);
     }
 
     #[test]
@@ -102,28 +97,20 @@ mod bench_helper_test {
         let scalars: Vec<_> =
             vec![<G1Affine as AffineCurve>::ScalarField::rand(&mut rng).into_repr(); num_points];
 
-        let baseline = compute_msm_baseline::<G1Affine>(&points, &scalars);
-        let opt = compute_msm_opt(&points, &scalars, 15);
-        assert_eq!(baseline, opt);
+        verify_correctness(&points, &scalars, 15);
     }
 
     #[test]
     fn test_msm_correctness_tremendous_points_c15() {
         let size = 1 << 10;
-        let (point_vec, scalar_vec) = generate_msm_inputs::<G1Affine>(size);
-        let baseline = compute_msm_baseline::<G1Affine>(&point_vec, &scalar_vec);
-        let opt = compute_msm_opt(&point_vec, &scalar_vec, 15);
-        assert_eq!(baseline, opt);
+        let (points, scalars) = generate_msm_inputs::<G1Affine>(size);
+        verify_correctness(&points, &scalars, 15);
     }
 
-/*
     #[test]
     fn test_msm_correctness_tremendous_points_c16() {
         let size = 1 << 10;
-        let (point_vec, scalar_vec) = generate_msm_inputs::<G1Affine>(size);
-        let baseline = compute_msm_baseline::<G1Affine>(&point_vec, &scalar_vec);
-        let opt = compute_msm_opt(&point_vec, &scalar_vec, 8);
-        assert_eq!(baseline, opt);
+        let (points, scalars) = generate_msm_inputs::<G1Affine>(size);
+        verify_correctness(&points, &scalars, 16);
     }
-*/
 }

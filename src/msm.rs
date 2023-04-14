@@ -1,14 +1,41 @@
 use crate::{
     bucket_msm::BucketMSM,
     glv::{decompose},
-    types::{G1BigInt, G1Projective, G1_SCALAR_SIZE_GLV},
+    types::{G1BigInt, G1Projective, G1_SCALAR_SIZE_GLV, GROUP_SIZE_LOG2},
 };
 use ark_bls12_381::{G1Affine, Fr};
 use ark_ff::BigInteger;
+use ark_std::log2;
 
 pub struct VariableBaseMSM;
 
 impl VariableBaseMSM {
+    /// WARNING: this function is derived from benchmark results running
+    /// on a Ubuntu 20.04.2 LTS server with AMD EPYC 7282 16-Core CPU
+    /// and 128G memory, the optimal performance may vary on a different
+    /// configuration.
+    fn get_opt_window_size(k: u32) -> u32 {
+        if k < 10 {
+            return 8;
+        }
+        match k {
+            10 => 10,
+            11 => 10,
+            12 => 10,
+            13 => 12,
+            14 => 12,
+            15 => 13,
+            16 => 13,
+            17 => 13,
+            18 => 13,
+            19 => 13,
+            20 => 15,
+            21 => 15,
+            22 => 15,
+            _ => 16
+        }
+    }
+
     fn msm_slice(scalar: G1BigInt, slices: &mut Vec<u32>, window_bits: u32) {
         assert!(window_bits <= 31); // reserve one bit for marking signed slices
         let mut temp = scalar;
@@ -38,12 +65,14 @@ impl VariableBaseMSM {
     }
 
     pub fn multi_scalar_mul_custom(
-        points: &Vec<G1Affine>,
-        scalars: &Vec<G1BigInt>,
+        points: &[G1Affine],
+        scalars: &[G1BigInt],
         window_bits: u32,
         max_batch: u32,
         max_collisions: u32
     ) -> G1Projective {
+        assert!(window_bits as usize > GROUP_SIZE_LOG2,
+                "Window_bits must be greater than the default log(group size)");
         let mut bucket_msm = BucketMSM::new(
             G1_SCALAR_SIZE_GLV,
             window_bits,
@@ -68,6 +97,11 @@ impl VariableBaseMSM {
 
         bucket_msm.process_complete();
         return bucket_msm.batch_reduce();
+    }
+
+    pub fn multi_scalar_mul(points: &[G1Affine], scalars: &[G1BigInt]) -> G1Projective {
+        let opt_window_size = Self::get_opt_window_size(log2(points.len()));
+        Self::multi_scalar_mul_custom(&points, &scalars, opt_window_size, 2048, 256)
     }
 }
 

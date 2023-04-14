@@ -1,10 +1,10 @@
-#[path = "utils/bench_helper.rs"]
-mod bench_helper;
-
-use ark_bls12_381::G1Affine;
-use ark_msm::utils::generate_msm_inputs;
 use criterion::{BenchmarkId, black_box, Criterion, criterion_group, criterion_main};
-use bench_helper::{compute_msm_baseline, compute_msm_opt, get_opt_window_size};
+use ark_bls12_381::G1Affine;
+use ark_msm::{
+    utils::generate_msm_inputs,
+    msm::VariableBaseMSM
+};
+use ark_ec::msm::VariableBaseMSM as BaselineVariableBaseMSM;
 
 
 fn benchmark_with_baseline(c: &mut Criterion) {
@@ -15,13 +15,12 @@ fn benchmark_with_baseline(c: &mut Criterion) {
         let scalar_vec = black_box(scalar_vec);
         group.bench_with_input(BenchmarkId::new("Baseline", size), &size, |b, _size| {
             b.iter(|| {
-                let _ = compute_msm_baseline::<G1Affine>(&point_vec, &scalar_vec);
+                let _ = BaselineVariableBaseMSM::multi_scalar_mul(&point_vec, &scalar_vec);
             })
         });
-        let window_size = get_opt_window_size(1 << size) as u32;
-        group.bench_with_input(BenchmarkId::new("Ark-MSM", size), &size, |b, _size| {
+        group.bench_with_input(BenchmarkId::new("ArkMSM", size), &size, |b, _size| {
             b.iter(|| {
-                let _ = compute_msm_opt(&point_vec, &scalar_vec, window_size);
+                let _ = VariableBaseMSM::multi_scalar_mul(&point_vec, &scalar_vec);
             })
         });
     }

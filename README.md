@@ -67,7 +67,8 @@ Detailed documentations about each optimization are available at [https://hackmd
 
 * Run Benchmarks:
     ```bash
-    cargo bench
+    cargo bench -- bench_with_baseline
+    cargo bench -- bench_window_size
     ```
 
 ## Acknowledgement

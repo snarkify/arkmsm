@@ -1,17 +1,14 @@
 use ark_bls12_381::G1Affine;
-use ark_ec::{ProjectiveCurve};
-use ark_std::{Zero};
+use ark_ec::ProjectiveCurve;
+use ark_std::Zero;
 
 use crate::{
-    bitmap::Bitmap,
-    types::G1Projective,
     batch_adder::BatchAdder,
-    glv::endomorphism
+    bitmap::Bitmap,
+    glv::endomorphism,
+    types::{G1Projective, GROUP_SIZE, GROUP_SIZE_LOG2},
+    collision_state::CollisionState
 };
-use crate::collision_state::CollisionState;
-
-const GROUP_SIZE_LOG2: usize = 6;
-const GROUP_SIZE: usize = 1 << GROUP_SIZE_LOG2;
 
 pub struct BucketMSM {
     num_windows: u32,

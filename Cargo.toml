@@ -32,5 +32,8 @@ opt-level = 3
 
 [[bench]]
 harness = false
-name = "bench_msm"
+name = "bench_window_size"
 
+[[bench]]
+harness = false
+name = "bench_with_baseline"
