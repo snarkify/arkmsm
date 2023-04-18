@@ -7,30 +7,24 @@ use crate::{
     bitmap::Bitmap,
     glv::endomorphism,
     types::{G1Projective, GROUP_SIZE, GROUP_SIZE_LOG2},
-    collision_state::CollisionState
 };
 
 pub struct BucketMSM {
     num_windows: u32,
     window_bits: u32,
     bucket_bits: u32,
+    max_batch_cnt: u32,          // max slices allowed in a batch
+    max_collision_cnt: u32,
     buckets: Vec<G1Affine>, // size (num_windows << window_bits) * 2
 
     // current batch state
-    cur_points: Vec<G1Affine>, // points of current batch, size batch_size + 2 x max_collision_cnt
-    cur_points_cnt: u32,
-    cur_bkt_pnt_pairs: Vec<u64>, // encoded as <point_idx, bucket> pair, size max_batch_cnt
-    cur_batch_cnt: u32,          // number of slices to be processed in current batch
-    max_batch_cnt: u32,          // max slices allowed in a batch
+    bitmap: Bitmap,
+    batch_buckets_and_points: Vec<(u32, u32)>,
+    collision_buckets_and_points: Vec<(u32, G1Affine)>,
+    cur_points: Vec<G1Affine>, // points of current batch, size batch_size
 
     // batch affine adder
     batch_adder: BatchAdder,
-
-    // collision and pending slices state
-    // a collision occurs when adding a point to bucket and found is already a
-    // point in the same batch has been assigned to the same bucket
-    bitmap: Bitmap,
-    collision_state: CollisionState,
 }
 
 impl BucketMSM {
@@ -51,20 +45,16 @@ impl BucketMSM {
             num_windows,
             window_bits,
             bucket_bits,
+            max_batch_cnt,
+            max_collision_cnt,
             buckets: vec![G1Affine::zero(); bucket_size as usize],
 
-            // 2 * max_collision_cnt for unprocessed and processing
-            cur_points: vec![G1Affine::zero(); (batch_size + 2 * max_collision_cnt) as usize],
-            cur_points_cnt: 0,
-            cur_bkt_pnt_pairs: vec![0; batch_size as usize],
-            cur_batch_cnt: 0,
-            max_batch_cnt,
+            bitmap: Bitmap::new(bucket_size as usize / 32),
+            batch_buckets_and_points: Vec::with_capacity(batch_size as usize),
+            collision_buckets_and_points: Vec::with_capacity(max_collision_cnt as usize),
+            cur_points: vec![G1Affine::zero(); batch_size  as usize],
 
             batch_adder: BatchAdder::new(batch_adder_size as usize),
-
-            bitmap: Bitmap::new(bucket_size as usize / 32),
-
-            collision_state: CollisionState::new(max_collision_cnt as usize),
         }
     }
 
@@ -85,25 +75,23 @@ impl BucketMSM {
         if is_neg_scalar {p.y = -p.y};
         if is_neg_normal {p.y = -p.y};
 
-        self.cur_points[self.cur_points_cnt as usize] = p.clone();
-        self.cur_points_cnt += 1;
+        self.cur_points.push(p.clone());
         for win in 0..normal_slices.len() {
             if (normal_slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + normal_slices[win] - 1;
-                self._process_slices(bucket_id, &p);
+                self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
             }
         }
 
         p.y = -p.y;
 
-        self.cur_points[self.cur_points_cnt as usize] = p.clone();
-        self.cur_points_cnt += 1;
+        self.cur_points.push(p.clone());
         for win in 0..normal_slices.len() {
             if (normal_slices[win] as i32) < 0 {
                 let slice = normal_slices[win] & 0x7FFFFFFF;
                 if slice > 0 {
                     let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
-                    self._process_slices(bucket_id, &p);
+                    self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
                 }
             }
         }
@@ -113,25 +101,23 @@ impl BucketMSM {
         if is_neg_normal {p.y = -p.y;}
         endomorphism(&mut p);
 
-        self.cur_points[self.cur_points_cnt as usize] = p.clone();
-        self.cur_points_cnt += 1;
+        self.cur_points.push(p.clone());
         for win in 0..phi_slices.len() {
             if (phi_slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + phi_slices[win] - 1;
-                self._process_slices(bucket_id, &p);
+                self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
             }
         }
 
         p.y = -p.y;
 
-        self.cur_points[self.cur_points_cnt as usize] = p.clone();
-        self.cur_points_cnt += 1;
+        self.cur_points.push(p.clone());
         for win in 0..phi_slices.len() {
             if (phi_slices[win] as i32) < 0 {
                 let slice = phi_slices[win] & 0x7FFFFFFF;
                 if slice > 0 {
                     let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
-                    self._process_slices(bucket_id, &p);
+                    self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
                 }
             }
         }
@@ -145,28 +131,24 @@ impl BucketMSM {
             slices.len(), self.num_windows
         );
 
-        self.cur_points[self.cur_points_cnt as usize] = *point; // copy
-        self.cur_points_cnt += 1;
+        self.cur_points.push(point.clone());
         for win in 0..slices.len() {
             if (slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + slices[win] - 1; // skip slice == 0
-                self._process_slices(bucket_id, point);
+                self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
             }
         }
 
         let mut neg_p = *point;
         neg_p.y = -neg_p.y;
 
-        let mut cur_point = &mut self.cur_points[self.cur_points_cnt as usize];
-        *cur_point = *point;
-        cur_point.y = -cur_point.y;
-        self.cur_points_cnt += 1;
+        self.cur_points.push(neg_p);
         for win in 0..slices.len() {
             if (slices[win] as i32) < 0 {
                 let slice = slices[win] & 0x7FFFFFFF;
                 if slice > 0 {
                     let bucket_id = (win << self.bucket_bits) as u32 + slice - 1; // skip slice == 0
-                    self._process_slices(bucket_id, &neg_p);
+                    self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
                 }
             }
         }
@@ -174,107 +156,55 @@ impl BucketMSM {
 
     pub fn process_complete(&mut self) {
         self._process_batch();
-        while self.collision_state.needs_processing() {
+        while !(self.collision_buckets_and_points.is_empty() && self.batch_buckets_and_points.is_empty()) {
             self._process_batch();
         }
     }
 
-    fn _process_slices(&mut self, bucket_id: u32, point: &G1Affine) {
+    fn _process_slices(&mut self, bucket_id: u32, point_idx: u32) {
         if !self.bitmap.test_and_set(bucket_id) {
             // if no collision found, add point to current batch
-
-            let acc = &self.buckets[bucket_id as usize];
-            // print!("bucket_id: {}, pair index: {}, point index {}\n", bucket_id, self.cur_batch_cnt, self.cur_points_cnt - 1);
-            self.batch_adder.batch_add_phase_one(acc, point, self.cur_batch_cnt as usize);
-
-            self.cur_bkt_pnt_pairs[self.cur_batch_cnt as usize] =
-                ((bucket_id as u64) << 14) + self.cur_points_cnt as u64 - 1;
-            self.cur_batch_cnt += 1;
+            self.batch_buckets_and_points.push((bucket_id, point_idx));
         } else {
-            // if collision, add point to unprocessed_list
-            // cur_points: [ max_batch_cnt area |  point1,           point, ...           ]
-            let collision_index = self.collision_state.add_unprocessed(bucket_id);
-            // cur_points: [max_batch_cnt points | 2*max_collisions points]
-            self.cur_points[(self.max_batch_cnt + collision_index) as usize] = *point; // copy
-            // print!("Collision: bucket_id {}, point_idx {}\n", bucket_id, free_node_index);
+            self.collision_buckets_and_points.push((bucket_id, self.cur_points[point_idx as usize]));
         }
 
-        if self.collision_state.reaches_max_collision_count() ||
-            self.cur_batch_cnt >= self.max_batch_cnt
-        {
+        if self.collision_buckets_and_points.len() as u32 >= self.max_collision_cnt ||
+                self.batch_buckets_and_points.len() as u32 >= self.max_batch_cnt {
             self._process_batch();
         }
     }
 
     fn _process_batch(&mut self) {
-        // print!("_process_batch: collision_cnt {} cur_batch_cnt {}\n", self.collision_cnt, self.cur_batch_cnt);
-
-        // batch add phase two
-        self.batch_adder.inverse();
-        for i in (0..self.cur_batch_cnt).rev() {
-            let bucket_point = self.cur_bkt_pnt_pairs[i as usize];
-            let point = &self.cur_points[(bucket_point & 0x3FFF) as usize];
-            let acc = &mut self.buckets[(bucket_point >> 14) as usize];
-            // print!("phase_two: bucket_id: {}, pair index: {}, point_idx {}\n", bucket_point >> 14, i, bucket_point & 0x3FFF);
-            // print!{"phase_two acc: {}\n", acc};
-            // print!{"phase_two point: {}\n", point};
-            self.batch_adder.batch_add_phase_two(acc, point, i as usize);
-            // print!{"phase_two result: {}\n", acc};
-        }
-        // points in processing state has been processed, slots can be freed
-        self.collision_state.free_processing();
-
-        // process collision if we have more unprocessed points
-        if !self.collision_state.needs_processing() {
+        if self.batch_buckets_and_points.is_empty() {
             return;
         }
-
+        // batch addition
+        let (bucket_ids, point_idxs): (Vec<u32>, Vec<u32>) = self.batch_buckets_and_points
+            .iter().map(|(b, p)| (*b, *p)).unzip();
+        self.batch_adder.batch_add_indexed(&mut self.buckets, &bucket_ids, &self.cur_points, &point_idxs);
+        // clean up current batch
         self.bitmap.clear();
-        // reset inverse_state
-        self.batch_adder.reset();
+        self.batch_buckets_and_points.clear();
+        // memorize the last point which is the current processing point and we need to
+        // push it back to the cur_points list since we're processing slices in a for loop
+        let slicing_point = self.cur_points.pop();
+        self.cur_points.clear();
 
-        // previous points were processed except the last
-        self.cur_points[0] = self.cur_points[self.cur_points_cnt as usize - 1];
-        self.cur_points_cnt = 1;
-
-        self.cur_batch_cnt = 0;
-        // Process collision points
-        // iterate over the unprocessed list
-        //   - add to processing if no collision
-        //   - add back to unprocessed if collision again
-        let tail_idx = self.collision_state.get_unprocessed_tail();
-        let mut cur_entry_idx = self.collision_state.dequeue_unprocessed();
-        loop {
-            let bucket_id = self.collision_state.get_entry_data(cur_entry_idx);
-
-            if !self.bitmap.test_and_set(bucket_id) {
-                // print!("no collision\n");
-                // if no collision get point from the collision area in cur_points
-                let point = &self.cur_points[(self.max_batch_cnt + cur_entry_idx) as usize];
-
-                let acc = &self.buckets[bucket_id as usize];
-                // space after max_batch_cnt for collisioned points
-                let point_idx = self.max_batch_cnt + cur_entry_idx;
-                // print!("_process_batch: bucket_id {}, point index: {}, batch index {}\n", bucket_id, point_idx, self.cur_batch_cnt);
-                self.batch_adder.batch_add_phase_one(acc, point, self.cur_batch_cnt as usize);
-
-                // print!("bucket_id {}, point idx {}\n", bucket_id, cur_node_idx);
-                self.cur_bkt_pnt_pairs[self.cur_batch_cnt as usize] =
-                    ((bucket_id as u64) << 14) + point_idx as u64;
-                self.cur_batch_cnt += 1;
-                self.collision_state.mark_entry_processing(cur_entry_idx);
+        let mut next_pos = 0;
+        for i in 0..self.collision_buckets_and_points.len() {
+            let (bucket_id, point) = self.collision_buckets_and_points[i];
+            if self.bitmap.test_and_set(bucket_id) {
+                // collision found
+                self.collision_buckets_and_points.swap(next_pos, i);
+                next_pos += 1;
             } else {
-                // print!("collision\n");
-                self.collision_state.mark_entry_unprocessed(cur_entry_idx);
-            }
-
-            if cur_entry_idx == tail_idx {
-                // reached to the original tail of the queue, stop
-                break;
-            } else {
-                cur_entry_idx = self.collision_state.dequeue_unprocessed();
+                self.batch_buckets_and_points.push((bucket_id, self.cur_points.len() as u32));
+                self.cur_points.push(point);
             }
         }
+        self.collision_buckets_and_points.truncate(next_pos);
+        self.cur_points.push(slicing_point.unwrap());
     }
 
     pub fn batch_reduce(&mut self) -> G1Projective {

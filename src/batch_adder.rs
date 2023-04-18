@@ -55,6 +55,28 @@ impl BatchAdder {
         }
     }
 
+    /// Batch add vector dest[dest_index] and src[src_index] using the specified indexes in input
+    /// the results will be stored in dest, i.e. dest[i] = dest[i] + src[i]
+    pub fn batch_add_indexed(&mut self,
+                            dest: &mut [G1Affine],
+                            dest_indexes: &[u32],
+                            src: &[G1Affine],
+                            src_indexes: &[u32]) {
+        assert!(dest.len() > dest_indexes.len(), "insufficient entries in dest array");
+        assert!(dest_indexes.len() <= self.inverses.len(),
+                "input length exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!");
+        assert_eq!(dest_indexes.len(), src_indexes.len(), "length of dest_indexes and src_indexes don't match!");
+
+        self.reset();
+        for i in 0..dest_indexes.len() {
+            self.batch_add_phase_one(&dest[dest_indexes[i] as usize], &src[src_indexes[i] as usize], i);
+        }
+        self.inverse();
+        for i in (0..dest_indexes.len()).rev() {
+            self.batch_add_phase_two(&mut dest[dest_indexes[i] as usize], &src[src_indexes[i] as usize], i);
+        }
+    }
+
     pub fn inverse(&mut self) {
         self.inverse_state = self.inverse_state.inverse().unwrap();
     }
@@ -318,6 +340,26 @@ mod batch_add_tests {
 
         for i in 0..3 {
             assert_eq!(buckets[i], tmp[i].add(points[i * 2]));
+        }
+    }
+
+    #[test]
+    fn test_batch_add_indexed() {
+        let mut batch_adder = BatchAdder::new(10);
+
+        let mut rng = ark_std::test_rng();
+        let mut buckets: Vec<G1Affine> = (0..10)
+            .map(|_| G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng)))
+            .collect();
+        let points: Vec<G1Affine> = (0..10)
+            .map(|_| G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng)))
+            .collect();
+
+        let tmp = buckets.clone();
+        batch_adder.batch_add_indexed(&mut buckets, &[0, 2, 4], &points, &[0, 2, 4]);
+
+        for i in (0..5).step_by(2) {
+            assert_eq!(buckets[i], tmp[i].add(points[i]));
         }
     }
 }

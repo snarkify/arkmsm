@@ -4,6 +4,5 @@ pub mod glv;
 pub mod types;
 pub mod msm;
 
-mod collision_state;
-mod batch_adder;
 mod bucket_msm;
+mod batch_adder;
