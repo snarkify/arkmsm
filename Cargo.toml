@@ -1,14 +1,17 @@
 [package]
 name = "ark-msm"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 authors = [
     "Jiannan Ouyang <ouyang@snarkify.io>",
-    "Boyu Sun <boyu@snarkify.io>"
+    "Boyu Sun <boyu@snarkify.io>",
+    "Chao Ma <chao@snarkify.io>"
 ]
-description = "A library for multi-scalar muliplication"
-homepage = "https://github.com/snarkify/ark-msm"
-repository = "https://github.com/snarkify/ark-msm"
-keywords = ["cryptography", "msm"]
+description = "An optimized multi-scalar muliplication (MSM) library based on arkworks"
+homepage = "https://github.com/snarkify/arkmsm"
+repository = "https://github.com/snarkify/arkmsm"
+documentation = "https://hackmd.io/@drouyang/msm"
+readme = "README.md"
+keywords = ["cryptography", "msm", "zkp"]
 categories = ["cryptography"]
 license = "MIT/Apache-2.0"
 edition = "2021"
