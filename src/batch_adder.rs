@@ -1,23 +1,25 @@
-use ark_bls12_381::G1Affine;
-use ark_ec::{AffineCurve};
 use ark_ff::Field;
 use ark_std::{One, Zero};
+use ark_ec::{
+    short_weierstrass_jacobian::GroupAffine,
+    models::SWModelParameters as Parameters
+};
 
-pub struct BatchAdder {
-    inverse_state: <G1Affine as AffineCurve>::BaseField,
-    inverses: Vec<<G1Affine as AffineCurve>::BaseField>,
+pub struct BatchAdder<P: Parameters> {
+    inverse_state: P::BaseField,
+    inverses: Vec<P::BaseField>,
 }
 
-impl BatchAdder {
+impl<P: Parameters> BatchAdder<P> {
     pub fn new(max_batch_cnt: usize) -> Self {
         BatchAdder {
-            inverse_state: <G1Affine as AffineCurve>::BaseField::one(),
-            inverses: vec![<G1Affine as AffineCurve>::BaseField::one(); max_batch_cnt],
+            inverse_state: P::BaseField::one(),
+            inverses: vec![P::BaseField::one(); max_batch_cnt],
         }
     }
 
     /// Batch add vector dest and src, the results will be stored in dest, i.e. dest[i] = dest[i] + src[i]
-    pub fn batch_add(&mut self, dest: &mut [G1Affine], src: &[G1Affine]) {
+    pub fn batch_add(&mut self, dest: &mut [GroupAffine<P>], src: &[GroupAffine<P>]) {
         assert!(dest.len() == src.len(), "length of dest and src don't match!");
         assert!(dest.len() <= self.inverses.len(),
                 "input length exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!");
@@ -35,9 +37,9 @@ impl BatchAdder {
     /// Batch add vector dest and src of len entries, skipping dest_step and src_step entries each
     /// the results will be stored in dest, i.e. dest[i] = dest[i] + src[i]
     pub fn batch_add_step_n(&mut self,
-                            dest: &mut [G1Affine],
+                            dest: &mut [GroupAffine<P>],
                             dest_step: usize,
-                            src: &[G1Affine],
+                            src: &[GroupAffine<P>],
                             src_step: usize,
                             len: usize) {
         assert!(dest.len() > (len - 1) * dest_step, "insufficient entries in dest array");
@@ -58,9 +60,9 @@ impl BatchAdder {
     /// Batch add vector dest[dest_index] and src[src_index] using the specified indexes in input
     /// the results will be stored in dest, i.e. dest[i] = dest[i] + src[i]
     pub fn batch_add_indexed(&mut self,
-                            dest: &mut [G1Affine],
+                            dest: &mut [GroupAffine<P>],
                             dest_indexes: &[u32],
-                            src: &[G1Affine],
+                            src: &[GroupAffine<P>],
                             src_indexes: &[u32]) {
         assert!(dest.len() > dest_indexes.len(), "insufficient entries in dest array");
         assert!(dest_indexes.len() <= self.inverses.len(),
@@ -96,8 +98,8 @@ impl BatchAdder {
     ///      - addition result acc
     pub fn batch_add_phase_one(
             &mut self,
-            p: &G1Affine,
-            q: &G1Affine,
+            p: &GroupAffine<P>,
+            q: &GroupAffine<P>,
             idx: usize,
         ) {
         assert!(idx < self.inverses.len(),
@@ -131,8 +133,8 @@ impl BatchAdder {
     /// should call inverse() between phase_one and phase_two
     pub fn batch_add_phase_two(
             &mut self,
-            p: &mut G1Affine,
-            q: &G1Affine,
+            p: &mut GroupAffine<P>,
+            q: &GroupAffine<P>,
             idx: usize,
         ) {
         assert!(idx < self.inverses.len(),
@@ -181,7 +183,8 @@ impl BatchAdder {
 #[cfg(test)]
 mod batch_add_tests {
     use super::*;
-    use ark_ec::ProjectiveCurve;
+    use ark_bls12_381::G1Affine;
+    use ark_ec::{ProjectiveCurve, AffineCurve};
     use ark_std::UniformRand;
     use std::ops::Add;
 

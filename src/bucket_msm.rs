@@ -1,45 +1,51 @@
+use std::any::TypeId;
+use ark_ec::{
+    ProjectiveCurve,
+    short_weierstrass_jacobian::{GroupAffine, GroupProjective},
+    models::SWModelParameters as Parameters
+};
+use ark_bls12_381::g1::Parameters as G1Parameters;
 use ark_bls12_381::G1Affine;
-use ark_ec::ProjectiveCurve;
 use ark_std::Zero;
 
 use crate::{
     batch_adder::BatchAdder,
     bitmap::Bitmap,
     glv::endomorphism,
-    types::{G1Projective, GROUP_SIZE, GROUP_SIZE_LOG2},
+    types::{GROUP_SIZE, GROUP_SIZE_IN_BITS},
 };
 
-pub struct BucketMSM {
+pub struct BucketMSM<P: Parameters> {
     num_windows: u32,
     window_bits: u32,
     bucket_bits: u32,
     max_batch_cnt: u32,          // max slices allowed in a batch
     max_collision_cnt: u32,
-    buckets: Vec<G1Affine>, // size (num_windows << window_bits) * 2
+    buckets: Vec<GroupAffine<P>>, // size (num_windows << window_bits) * 2
 
     // current batch state
     bitmap: Bitmap,
     batch_buckets_and_points: Vec<(u32, u32)>,
-    collision_buckets_and_points: Vec<(u32, G1Affine)>,
-    cur_points: Vec<G1Affine>, // points of current batch, size batch_size
+    collision_buckets_and_points: Vec<(u32, GroupAffine<P>)>,
+    cur_points: Vec<GroupAffine<P>>, // points of current batch, size batch_size
 
     // batch affine adder
-    batch_adder: BatchAdder,
+    batch_adder: BatchAdder<P>,
 }
 
-impl BucketMSM {
+impl<P: Parameters> BucketMSM<P> {
     pub fn new(
         scalar_bits: u32,
         window_bits: u32,
         max_batch_cnt: u32,     // default: 4096
         max_collision_cnt: u32, // default: 128
-    ) -> BucketMSM {
+    ) -> BucketMSM<P> {
         let num_windows = (scalar_bits + window_bits - 1) / window_bits;
         let batch_size = std::cmp::max(8192, max_batch_cnt);
         let bucket_bits = window_bits - 1; // half buckets needed because of signed-bucket-index
         let bucket_size = num_windows << bucket_bits;
         // size of batch_adder will be the max of batch_size and num_windows * groups per window
-        let batch_adder_size = std::cmp::max(batch_size, bucket_size >> GROUP_SIZE_LOG2);
+        let batch_adder_size = std::cmp::max(batch_size, bucket_size >> GROUP_SIZE_IN_BITS);
 
         BucketMSM {
             num_windows,
@@ -47,23 +53,26 @@ impl BucketMSM {
             bucket_bits,
             max_batch_cnt,
             max_collision_cnt,
-            buckets: vec![G1Affine::zero(); bucket_size as usize],
+            buckets: vec![GroupAffine::<P>::zero(); bucket_size as usize],
 
             bitmap: Bitmap::new(bucket_size as usize / 32),
             batch_buckets_and_points: Vec::with_capacity(batch_size as usize),
             collision_buckets_and_points: Vec::with_capacity(max_collision_cnt as usize),
-            cur_points: vec![G1Affine::zero(); batch_size  as usize],
+            cur_points: vec![GroupAffine::<P>::zero(); batch_size  as usize],
 
             batch_adder: BatchAdder::new(batch_adder_size as usize),
         }
     }
 
     pub fn process_point_and_slices_glv(
-            &mut self, point: &G1Affine,
+            &mut self,
+            point: &GroupAffine<P>,
             normal_slices: &Vec<u32>,
             phi_slices: &Vec<u32>,
             is_neg_scalar: bool,
             is_neg_normal: bool) {
+
+        assert_eq!(TypeId::of::<P>(), TypeId::of::<G1Parameters>(), "glv is only supported for ark_bls12_381");
         assert!(
             self.num_windows as usize == normal_slices.len() && normal_slices.len() == phi_slices.len(),
             "slice len check failed: normal_slices {}, phi_slices {}, num_windows {}",
@@ -99,7 +108,10 @@ impl BucketMSM {
         // process phi slices
         p.y = -p.y;
         if is_neg_normal {p.y = -p.y;}
-        endomorphism(&mut p);
+
+        // this isn't the cleanest of doing this, we'd better figure out a way to do this at compile time
+        let mut p_g1: &mut G1Affine= unsafe { &mut *(std::ptr::addr_of_mut!(p) as *mut G1Affine) };
+        endomorphism(&mut p_g1);
 
         self.cur_points.push(p.clone());
         for win in 0..phi_slices.len() {
@@ -123,8 +135,7 @@ impl BucketMSM {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn process_point_and_slices(&mut self, point: &G1Affine, slices: &Vec<u32>) {
+    pub fn process_point_and_slices(&mut self, point: &GroupAffine<P>, slices: &Vec<u32>) {
         assert!(
             self.num_windows as usize == slices.len(),
             "slices.len() {} should equal num_windows {}",
@@ -207,11 +218,11 @@ impl BucketMSM {
         self.cur_points.push(slicing_point.unwrap());
     }
 
-    pub fn batch_reduce(&mut self) -> G1Projective {
+    pub fn batch_reduce(&mut self) -> GroupProjective<P> {
         let window_starts: Vec<_> = (0..self.num_windows as usize).collect();
-        let num_groups = (self.num_windows as usize) << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
-        let mut running_sums: Vec<_> = vec![G1Affine::zero(); num_groups];
-        let mut sum_of_sums: Vec<_> = vec![G1Affine::zero(); num_groups];
+        let num_groups = (self.num_windows as usize) << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
+        let mut running_sums: Vec<_> = vec![GroupAffine::<P>::zero(); num_groups];
+        let mut sum_of_sums: Vec<_> = vec![GroupAffine::<P>::zero(); num_groups];
 
         // calculate running sum and sum of sum for each group
         for i in (0..GROUP_SIZE).rev() {
@@ -225,10 +236,10 @@ impl BucketMSM {
             self.batch_adder.batch_add(&mut sum_of_sums, &running_sums);
         }
 
-        let sum_by_window: Vec<G1Projective> = ark_std::cfg_into_iter!(window_starts)
+        let sum_by_window: Vec<GroupProjective<P>> = ark_std::cfg_into_iter!(window_starts)
             .map(|w_start| {
-                let group_start = w_start << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
-                let group_end = (w_start + 1) << (self.bucket_bits as usize - GROUP_SIZE_LOG2);
+                let group_start = w_start << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
+                let group_end = (w_start + 1) << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
                 self.inner_window_reduce(&running_sums[group_start..group_end],
                                          &sum_of_sums[group_start..group_end])
             }).collect();
@@ -236,31 +247,33 @@ impl BucketMSM {
         return self.intra_window_reduce(&sum_by_window);
     }
 
-    fn inner_window_reduce(&mut self, running_sums: &[G1Affine], sum_of_sums: &[G1Affine]) -> G1Projective {
+    fn inner_window_reduce(
+            &mut self, running_sums: &[GroupAffine<P>],
+            sum_of_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
         return self.calc_sum_of_sum_total(sum_of_sums) + self.calc_running_sum_total(running_sums);
     }
 
-    fn calc_running_sum_total(&mut self, running_sums: &[G1Affine]) -> G1Projective {
-        let mut running_sum_total = G1Projective::zero();
+    fn calc_running_sum_total(&mut self, running_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
+        let mut running_sum_total = GroupProjective::<P>::zero();
         for i in 1..running_sums.len() {
             for _ in 0..i {
                 running_sum_total.add_assign_mixed(&running_sums[i]);
             }
         }
 
-        for _ in 0..GROUP_SIZE_LOG2 {
+        for _ in 0..GROUP_SIZE_IN_BITS {
             running_sum_total.double_in_place();
         }
         return running_sum_total;
     }
 
-    fn calc_sum_of_sum_total(&mut self, sum_of_sums: &[G1Affine]) -> G1Projective {
-        let mut sum = G1Projective::zero();
+    fn calc_sum_of_sum_total(&mut self, sum_of_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
+        let mut sum = GroupProjective::<P>::zero();
         sum_of_sums.iter().for_each(|p| sum.add_assign_mixed(p));
         return sum;
     }
 
-    fn intra_window_reduce(&mut self, window_sums: &Vec<G1Projective>) -> G1Projective {
+    fn intra_window_reduce(&mut self, window_sums: &Vec<GroupProjective<P>>) -> GroupProjective<P> {
         // We store the sum for the lowest window.
         let lowest = *window_sums.first().unwrap();
 
@@ -269,7 +282,7 @@ impl BucketMSM {
         + &window_sums[1..]
             .iter()
             .rev()
-            .fold(G1Projective::zero(), |mut total, sum_i| {
+            .fold(GroupProjective::<P>::zero(), |mut total, sum_i| {
                 total += sum_i;
                 for _ in 0..self.window_bits {
                     total.double_in_place();
@@ -282,17 +295,16 @@ impl BucketMSM {
 #[cfg(test)]
 mod bucket_msm_tests {
     use super::*;
-    use ark_bls12_381::G1Affine;
+    use ark_bls12_381::{G1Affine, G1Projective};
     use ark_std::UniformRand;
-    use ark_ec::AffineCurve;
 
     #[test]
     fn test_process_point_and_slices_deal_two_points() {
         let window_bits = 15u32;
         let mut bucket_msm = BucketMSM::new(30u32, window_bits, 128u32, 4096u32);
         let mut rng = ark_std::test_rng();
-        let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
+        let p_prj = G1Projective::rand(&mut rng);
+        let q_prj = G1Projective::rand(&mut rng);
         let p = G1Affine::from(p_prj);
         let q = G1Affine::from(q_prj);
 
@@ -309,9 +321,9 @@ mod bucket_msm_tests {
         let window_bits = 15u32;
         let mut bucket_msm = BucketMSM::new(45u32, window_bits, 128u32, 4096u32);
         let mut rng = ark_std::test_rng();
-        let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let r_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
+        let p_prj = G1Projective::rand(&mut rng);
+        let q_prj = G1Projective::rand(&mut rng);
+        let r_prj = G1Projective::rand(&mut rng);
         let p = G1Affine::from(p_prj);
         let q = G1Affine::from(q_prj);
         let r = G1Affine::from(r_prj);
@@ -335,8 +347,8 @@ mod bucket_msm_tests {
         let window_bits = 15u32;
         let mut bucket_msm = BucketMSM::new(30u32, window_bits, 128u32, 4096u32);
         let mut rng = ark_std::test_rng();
-        let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
-        let q_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
+        let p_prj = G1Projective::rand(&mut rng);
+        let q_prj = G1Projective::rand(&mut rng);
         let mut p = G1Affine::from(p_prj);
         let mut q = G1Affine::from(q_prj);
 
