@@ -372,9 +372,7 @@ mod batch_add_tests {
         let mut rng = ark_std::test_rng();
 
         let mut buckets: Vec<G1Affine> = vec![G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng))];
-        let points: Vec<G1Affine> = (0..3)
-            .map(|_| G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng)))
-            .collect();
+        let points: Vec<G1Affine> = vec![G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng))];
 
         let tmp = buckets.clone();
         batch_adder.batch_add_indexed(&mut buckets, &[0], &points, &[0]);
