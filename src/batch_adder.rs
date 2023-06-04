@@ -64,7 +64,7 @@ impl<P: Parameters> BatchAdder<P> {
                             dest_indexes: &[u32],
                             src: &[GroupAffine<P>],
                             src_indexes: &[u32]) {
-        assert!(dest.len() > dest_indexes.len(), "insufficient entries in dest array");
+        assert!(dest.len() >= dest_indexes.len(), "insufficient entries in dest array");
         assert!(dest_indexes.len() <= self.inverses.len(),
                 "input length exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!");
         assert_eq!(dest_indexes.len(), src_indexes.len(), "length of dest_indexes and src_indexes don't match!");
@@ -349,8 +349,8 @@ mod batch_add_tests {
     #[test]
     fn test_batch_add_indexed() {
         let mut batch_adder = BatchAdder::new(10);
-
         let mut rng = ark_std::test_rng();
+
         let mut buckets: Vec<G1Affine> = (0..10)
             .map(|_| G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng)))
             .collect();
@@ -364,5 +364,19 @@ mod batch_add_tests {
         for i in (0..5).step_by(2) {
             assert_eq!(buckets[i], tmp[i].add(points[i]));
         }
+    }
+
+    #[test]
+    fn test_batch_add_indexed_single_bucket() {
+        let mut batch_adder = BatchAdder::new(1);
+        let mut rng = ark_std::test_rng();
+
+        let mut buckets: Vec<G1Affine> = vec![G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng))];
+        let points: Vec<G1Affine> = vec![G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng))];
+
+        let tmp = buckets.clone();
+        batch_adder.batch_add_indexed(&mut buckets, &[0], &points, &[0]);
+
+        assert_eq!(buckets[0], tmp[0].add(points[0]));
     }
 }
