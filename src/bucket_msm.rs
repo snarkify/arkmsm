@@ -1,12 +1,12 @@
-use std::any::TypeId;
-use ark_ec::{
-    ProjectiveCurve,
-    short_weierstrass_jacobian::{GroupAffine, GroupProjective},
-    models::SWModelParameters as Parameters
-};
 use ark_bls12_381::g1::Parameters as G1Parameters;
 use ark_bls12_381::G1Affine;
+use ark_ec::{
+    models::SWModelParameters as Parameters,
+    short_weierstrass_jacobian::{GroupAffine, GroupProjective},
+    ProjectiveCurve,
+};
 use ark_std::Zero;
+use std::any::TypeId;
 
 use crate::{
     batch_adder::BatchAdder,
@@ -19,7 +19,7 @@ pub struct BucketMSM<P: Parameters> {
     num_windows: u32,
     window_bits: u32,
     bucket_bits: u32,
-    max_batch_cnt: u32,          // max slices allowed in a batch
+    max_batch_cnt: u32, // max slices allowed in a batch
     max_collision_cnt: u32,
     buckets: Vec<GroupAffine<P>>, // size (num_windows << window_bits) * 2
 
@@ -58,33 +58,44 @@ impl<P: Parameters> BucketMSM<P> {
             bitmap: Bitmap::new(bucket_size as usize / 32),
             batch_buckets_and_points: Vec::with_capacity(batch_size as usize),
             collision_buckets_and_points: Vec::with_capacity(max_collision_cnt as usize),
-            cur_points: vec![GroupAffine::<P>::zero(); batch_size  as usize],
+            cur_points: vec![GroupAffine::<P>::zero(); batch_size as usize],
 
             batch_adder: BatchAdder::new(batch_adder_size as usize),
         }
     }
 
     pub fn process_point_and_slices_glv(
-            &mut self,
-            point: &GroupAffine<P>,
-            normal_slices: &Vec<u32>,
-            phi_slices: &Vec<u32>,
-            is_neg_scalar: bool,
-            is_neg_normal: bool) {
-
-        assert_eq!(TypeId::of::<P>(), TypeId::of::<G1Parameters>(), "glv is only supported for ark_bls12_381");
+        &mut self,
+        point: &GroupAffine<P>,
+        normal_slices: &Vec<u32>,
+        phi_slices: &Vec<u32>,
+        is_neg_scalar: bool,
+        is_neg_normal: bool,
+    ) {
+        assert_eq!(
+            TypeId::of::<P>(),
+            TypeId::of::<G1Parameters>(),
+            "glv is only supported for ark_bls12_381"
+        );
         assert!(
-            self.num_windows as usize == normal_slices.len() && normal_slices.len() == phi_slices.len(),
+            self.num_windows as usize == normal_slices.len()
+                && normal_slices.len() == phi_slices.len(),
             "slice len check failed: normal_slices {}, phi_slices {}, num_windows {}",
-            normal_slices.len(), phi_slices.len(), self.num_windows
+            normal_slices.len(),
+            phi_slices.len(),
+            self.num_windows
         );
 
         let mut p = *point; // copy
 
-        if is_neg_scalar {p.y = -p.y};
-        if is_neg_normal {p.y = -p.y};
+        if is_neg_scalar {
+            p.y = -p.y
+        };
+        if is_neg_normal {
+            p.y = -p.y
+        };
 
-        self.cur_points.push(p.clone());
+        self.cur_points.push(p);
         for win in 0..normal_slices.len() {
             if (normal_slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + normal_slices[win] - 1;
@@ -94,7 +105,7 @@ impl<P: Parameters> BucketMSM<P> {
 
         p.y = -p.y;
 
-        self.cur_points.push(p.clone());
+        self.cur_points.push(p);
         for win in 0..normal_slices.len() {
             if (normal_slices[win] as i32) < 0 {
                 let slice = normal_slices[win] & 0x7FFFFFFF;
@@ -107,13 +118,15 @@ impl<P: Parameters> BucketMSM<P> {
 
         // process phi slices
         p.y = -p.y;
-        if is_neg_normal {p.y = -p.y;}
+        if is_neg_normal {
+            p.y = -p.y;
+        }
 
         // this isn't the cleanest of doing this, we'd better figure out a way to do this at compile time
-        let mut p_g1: &mut G1Affine= unsafe { &mut *(std::ptr::addr_of_mut!(p) as *mut G1Affine) };
-        endomorphism(&mut p_g1);
+        let p_g1: &mut G1Affine = unsafe { &mut *(std::ptr::addr_of_mut!(p) as *mut G1Affine) };
+        endomorphism(p_g1);
 
-        self.cur_points.push(p.clone());
+        self.cur_points.push(p);
         for win in 0..phi_slices.len() {
             if (phi_slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + phi_slices[win] - 1;
@@ -123,7 +136,7 @@ impl<P: Parameters> BucketMSM<P> {
 
         p.y = -p.y;
 
-        self.cur_points.push(p.clone());
+        self.cur_points.push(p);
         for win in 0..phi_slices.len() {
             if (phi_slices[win] as i32) < 0 {
                 let slice = phi_slices[win] & 0x7FFFFFFF;
@@ -139,10 +152,11 @@ impl<P: Parameters> BucketMSM<P> {
         assert!(
             self.num_windows as usize == slices.len(),
             "slices.len() {} should equal num_windows {}",
-            slices.len(), self.num_windows
+            slices.len(),
+            self.num_windows
         );
 
-        self.cur_points.push(point.clone());
+        self.cur_points.push(*point);
         for win in 0..slices.len() {
             if (slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + slices[win] - 1; // skip slice == 0
@@ -167,7 +181,9 @@ impl<P: Parameters> BucketMSM<P> {
 
     pub fn process_complete(&mut self) {
         self._process_batch();
-        while !(self.collision_buckets_and_points.is_empty() && self.batch_buckets_and_points.is_empty()) {
+        while !(self.collision_buckets_and_points.is_empty()
+            && self.batch_buckets_and_points.is_empty())
+        {
             self._process_batch();
         }
     }
@@ -177,11 +193,13 @@ impl<P: Parameters> BucketMSM<P> {
             // if no collision found, add point to current batch
             self.batch_buckets_and_points.push((bucket_id, point_idx));
         } else {
-            self.collision_buckets_and_points.push((bucket_id, self.cur_points[point_idx as usize]));
+            self.collision_buckets_and_points
+                .push((bucket_id, self.cur_points[point_idx as usize]));
         }
 
-        if self.collision_buckets_and_points.len() as u32 >= self.max_collision_cnt ||
-                self.batch_buckets_and_points.len() as u32 >= self.max_batch_cnt {
+        if self.collision_buckets_and_points.len() as u32 >= self.max_collision_cnt
+            || self.batch_buckets_and_points.len() as u32 >= self.max_batch_cnt
+        {
             self._process_batch();
         }
     }
@@ -191,9 +209,17 @@ impl<P: Parameters> BucketMSM<P> {
             return;
         }
         // batch addition
-        let (bucket_ids, point_idxs): (Vec<u32>, Vec<u32>) = self.batch_buckets_and_points
-            .iter().map(|(b, p)| (*b, *p)).unzip();
-        self.batch_adder.batch_add_indexed(&mut self.buckets, &bucket_ids, &self.cur_points, &point_idxs);
+        let (bucket_ids, point_idxs): (Vec<u32>, Vec<u32>) = self
+            .batch_buckets_and_points
+            .iter()
+            .map(|(b, p)| (*b, *p))
+            .unzip();
+        self.batch_adder.batch_add_indexed(
+            &mut self.buckets,
+            &bucket_ids,
+            &self.cur_points,
+            &point_idxs,
+        );
         // clean up current batch
         self.bitmap.clear();
         self.batch_buckets_and_points.clear();
@@ -210,7 +236,8 @@ impl<P: Parameters> BucketMSM<P> {
                 self.collision_buckets_and_points.swap(next_pos, i);
                 next_pos += 1;
             } else {
-                self.batch_buckets_and_points.push((bucket_id, self.cur_points.len() as u32));
+                self.batch_buckets_and_points
+                    .push((bucket_id, self.cur_points.len() as u32));
                 self.cur_points.push(point);
             }
         }
@@ -220,18 +247,21 @@ impl<P: Parameters> BucketMSM<P> {
 
     pub fn batch_reduce(&mut self) -> GroupProjective<P> {
         let window_starts: Vec<_> = (0..self.num_windows as usize).collect();
-        let num_groups = (self.num_windows as usize) << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
+        let num_groups =
+            (self.num_windows as usize) << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
         let mut running_sums: Vec<_> = vec![GroupAffine::<P>::zero(); num_groups];
         let mut sum_of_sums: Vec<_> = vec![GroupAffine::<P>::zero(); num_groups];
 
         // calculate running sum and sum of sum for each group
         for i in (0..GROUP_SIZE).rev() {
             // running sum
-            self.batch_adder.batch_add_step_n(&mut running_sums,
-                                              1,
-                                              &self.buckets[i..],
-                                              GROUP_SIZE,
-                                              num_groups);
+            self.batch_adder.batch_add_step_n(
+                &mut running_sums,
+                1,
+                &self.buckets[i..],
+                GROUP_SIZE,
+                num_groups,
+            );
             // sum of sum
             self.batch_adder.batch_add(&mut sum_of_sums, &running_sums);
         }
@@ -240,17 +270,22 @@ impl<P: Parameters> BucketMSM<P> {
             .map(|w_start| {
                 let group_start = w_start << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
                 let group_end = (w_start + 1) << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
-                self.inner_window_reduce(&running_sums[group_start..group_end],
-                                         &sum_of_sums[group_start..group_end])
-            }).collect();
+                self.inner_window_reduce(
+                    &running_sums[group_start..group_end],
+                    &sum_of_sums[group_start..group_end],
+                )
+            })
+            .collect();
 
-        return self.intra_window_reduce(&sum_by_window);
+        self.intra_window_reduce(&sum_by_window)
     }
 
     fn inner_window_reduce(
-            &mut self, running_sums: &[GroupAffine<P>],
-            sum_of_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
-        return self.calc_sum_of_sum_total(sum_of_sums) + self.calc_running_sum_total(running_sums);
+        &mut self,
+        running_sums: &[GroupAffine<P>],
+        sum_of_sums: &[GroupAffine<P>],
+    ) -> GroupProjective<P> {
+        self.calc_sum_of_sum_total(sum_of_sums) + self.calc_running_sum_total(running_sums)
     }
 
     fn calc_running_sum_total(&mut self, running_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
@@ -264,31 +299,31 @@ impl<P: Parameters> BucketMSM<P> {
         for _ in 0..GROUP_SIZE_IN_BITS {
             running_sum_total.double_in_place();
         }
-        return running_sum_total;
+        running_sum_total
     }
 
     fn calc_sum_of_sum_total(&mut self, sum_of_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
         let mut sum = GroupProjective::<P>::zero();
         sum_of_sums.iter().for_each(|p| sum.add_assign_mixed(p));
-        return sum;
+        sum
     }
 
-    fn intra_window_reduce(&mut self, window_sums: &Vec<GroupProjective<P>>) -> GroupProjective<P> {
+    fn intra_window_reduce(&mut self, window_sums: &[GroupProjective<P>]) -> GroupProjective<P> {
         // We store the sum for the lowest window.
         let lowest = *window_sums.first().unwrap();
 
         // We're traversing windows from high to low.
         lowest
-        + &window_sums[1..]
-            .iter()
-            .rev()
-            .fold(GroupProjective::<P>::zero(), |mut total, sum_i| {
-                total += sum_i;
-                for _ in 0..self.window_bits {
-                    total.double_in_place();
-                }
-                total
-            })
+            + window_sums.iter().skip(1).rev().fold(
+                GroupProjective::<P>::zero(),
+                |mut total, sum_i| {
+                    total += sum_i;
+                    for _ in 0..self.window_bits {
+                        total.double_in_place();
+                    }
+                    total
+                },
+            )
     }
 }
 
@@ -352,8 +387,20 @@ mod bucket_msm_tests {
         let mut p = G1Affine::from(p_prj);
         let mut q = G1Affine::from(q_prj);
 
-        bucket_msm.process_point_and_slices_glv(&p, &vec![1u32, 3u32], &vec![4u32, 6u32], false, false);
-        bucket_msm.process_point_and_slices_glv(&q, &vec![2u32, 3u32], &vec![5u32, 6u32], false, false);
+        bucket_msm.process_point_and_slices_glv(
+            &p,
+            &vec![1u32, 3u32],
+            &vec![4u32, 6u32],
+            false,
+            false,
+        );
+        bucket_msm.process_point_and_slices_glv(
+            &q,
+            &vec![2u32, 3u32],
+            &vec![5u32, 6u32],
+            false,
+            false,
+        );
         bucket_msm.process_complete();
         assert_eq!(bucket_msm.buckets[0], p);
         assert_eq!(bucket_msm.buckets[1], q);

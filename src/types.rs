@@ -1,13 +1,9 @@
 use ark_bls12_381::G1Affine;
-use ark_ec::{
-    AffineCurve,
-    models::ModelParameters
-};
+use ark_ec::{models::ModelParameters, AffineCurve};
 use ark_ff::{FpParameters, PrimeField};
 
 pub const G1_SCALAR_SIZE: u32 =
-    <<<G1Affine as AffineCurve>::ScalarField as PrimeField>::Params as FpParameters>::MODULUS_BITS
-        as u32;
+    <<<G1Affine as AffineCurve>::ScalarField as PrimeField>::Params as FpParameters>::MODULUS_BITS;
 pub const G1_SCALAR_SIZE_GLV: u32 = 128u32;
 pub const GROUP_SIZE_IN_BITS: usize = 6;
 pub const GROUP_SIZE: usize = 1 << GROUP_SIZE_IN_BITS;

@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod glv_tests {
-    use ark_msm::{glv::*, types::G1ScalarField};
-    use ark_bls12_381::{G1Affine, Fr};
+    use ark_bls12_381::{Fr, G1Affine};
     use ark_ec::AffineCurve;
-    use ark_ff::{UniformRand, PrimeField, BigInteger256};
+    use ark_ff::{BigInteger256, PrimeField, UniformRand};
+    use ark_msm::{glv::*, types::G1ScalarField};
     use num_bigint::BigUint;
 
     #[test]
@@ -37,7 +37,11 @@ mod glv_tests {
 
         let lambda: u128 = 0xac45a4010001a40200000000ffffffff;
         let mut ss: BigUint = s.into();
-        let modulus: BigUint = BigUint::parse_bytes(b"73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001", 16).unwrap();
+        let modulus: BigUint = BigUint::parse_bytes(
+            b"73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001",
+            16,
+        )
+        .unwrap();
         if s.into_repr().as_ref()[3] >= 0x3FFFFFFFF {
             ss = modulus - ss;
         }
@@ -58,7 +62,7 @@ mod glv_tests {
         ]));
         let p = G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng));
 
-        let mut endo_p = p.clone();
+        let mut endo_p = p;
         endomorphism(&mut endo_p);
 
         let lambda_p = G1Affine::from(p.mul(lambda));

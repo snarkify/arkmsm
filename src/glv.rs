@@ -1,10 +1,9 @@
-use ark_bls12_381::{G1Affine};
-use ark_ff::{PrimeField, field_new, BigInteger256};
+use ark_bls12_381::G1Affine;
+use ark_ff::{field_new, BigInteger256, PrimeField};
 use ark_std::Zero;
 use num_bigint::BigUint;
 
-use crate::types::{G1ScalarField, G1BaseField};
-
+use crate::types::{G1BaseField, G1ScalarField};
 
 // Decompose scalar = q * lambda + r with barret reduction
 // Here we implement algorithm 2 example 1 described in
@@ -16,7 +15,8 @@ const LAMBDA: u128 = 0xac45a4010001a40200000000ffffffff;
 pub fn decompose_slow(scalar: &G1ScalarField) -> (G1ScalarField, G1ScalarField) {
     // let lambda: u128 = 0xac45a4010001a40200000000ffffffff;
     // 2**256 // LAMBDA
-    let inv_approx: BigUint = BigUint::parse_bytes(b"17c6becf1e01faadd63f6e522f6cfee30", 16).unwrap();
+    let inv_approx: BigUint =
+        BigUint::parse_bytes(b"17c6becf1e01faadd63f6e522f6cfee30", 16).unwrap();
     let s: BigUint = scalar.into_repr().into();
     let s_hi = s.clone() >> 128;
     let mut quotient: BigUint = (s_hi * inv_approx) >> 128;
@@ -25,17 +25,25 @@ pub fn decompose_slow(scalar: &G1ScalarField) -> (G1ScalarField, G1ScalarField) 
         remainder -= LAMBDA;
         quotient += 1u32;
     }
-    (G1ScalarField::from(quotient), G1ScalarField::from(remainder))
+    (
+        G1ScalarField::from(quotient),
+        G1ScalarField::from(remainder),
+    )
 }
 
 const LMDA1: u128 = 0xac45a4010001a402; // lambda high 64 bit
 const LMDA0: u128 = 0x00000000ffffffff; // lambda low 64 bit
-// const INV2: u128 = 0x1;                // 2**256 // lambda - 128th bit
+
+// const INV2: u128 = 0x1;              // 2**256 // lambda - 128th bit
+
 const INV1: u128 = 0x7c6becf1e01faadd; // 2**256 // lambda - [64, 127] bit
 const INV0: u128 = 0x63f6e522f6cfee30; // 2**256 // lambda - [0, 63] bit
 const MASK64: u128 = 0xffffffffffffffff;
 
-pub fn decompose(scalar: &G1ScalarField, window_bits: u32) -> (G1ScalarField, G1ScalarField, bool, bool) {
+pub fn decompose(
+    scalar: &G1ScalarField,
+    window_bits: u32,
+) -> (G1ScalarField, G1ScalarField, bool, bool) {
     let (s0, s1, s2, s3, is_neg_scalar) = glv_preprocess_scalar(scalar, window_bits);
 
     // 255 bits in four 64b limbs
@@ -48,8 +56,8 @@ pub fn decompose(scalar: &G1ScalarField, window_bits: u32) -> (G1ScalarField, G1
     let q2: u128 = s2 + INV1 * s3 + (q1 >> 64);
     let q3: u128 = s3 + (q2 >> 64);
 
-    let mut quotient0: u128 = q2 & MASK64; 
-    let mut quotient1: u128 = q3 & MASK64; 
+    let mut quotient0: u128 = q2 & MASK64;
+    let mut quotient1: u128 = q3 & MASK64;
 
     // t = quotient * LAMBDA
     let t0: u128 = quotient0 * LMDA0;
@@ -60,11 +68,11 @@ pub fn decompose(scalar: &G1ScalarField, window_bits: u32) -> (G1ScalarField, G1
     // r = scalar - t
     let mut carry: i128 = s0 as i128 - (t0 & MASK64) as i128;
     let mut r0: u64 = (carry as u128 & MASK64) as u64;
-    carry = carry >> 64;
+    carry >>= 64;
 
     carry += s1 as i128 - (t1 & MASK64) as i128;
     let mut r1: u64 = (carry as u128 & MASK64) as u64;
-    carry = carry >> 64;
+    carry >>= 64;
 
     carry += s2 as i128 - (t2 & MASK64) as i128;
     let mut r2: u64 = (carry as u128 & MASK64) as u64;
@@ -76,13 +84,14 @@ pub fn decompose(scalar: &G1ScalarField, window_bits: u32) -> (G1ScalarField, G1
     loop {
         carry = r0 as i128 - LMDA0 as i128;
         let t0: u64 = (carry as u128 & MASK64) as u64;
-        carry = carry >> 64;
+        carry >>= 64;
 
         carry += r1 as i128 - LMDA1 as i128;
         let t1: u64 = (carry as u128 & MASK64) as u64;
-        carry = carry >> 64;
+        carry >>= 64;
 
-        if carry < 0 && r2 == 0 {  // went negative
+        if carry < 0 && r2 == 0 {
+            // went negative
             break;
         }
 
@@ -102,10 +111,12 @@ pub fn decompose(scalar: &G1ScalarField, window_bits: u32) -> (G1ScalarField, G1
         is_neg_remainder = glv_post_processing(&mut quotient0, &mut quotient1, &mut r0, &mut r1);
     }
 
-    (G1ScalarField::from(BigInteger256([quotient0 as u64, quotient1 as u64, 0, 0])), 
-     G1ScalarField::from(BigInteger256([r0, r1, 0, 0])),
-     is_neg_scalar,
-     is_neg_remainder)
+    (
+        G1ScalarField::from(BigInteger256([quotient0 as u64, quotient1 as u64, 0, 0])),
+        G1ScalarField::from(BigInteger256([r0, r1, 0, 0])),
+        is_neg_scalar,
+        is_neg_remainder,
+    )
 }
 
 // With the signed-bucket-index trick, slice[i] add a carry to slice[i+1] when
@@ -125,7 +136,10 @@ const R0: i128 = 0xffffffff00000001;
 
 // use sP = (N - s)(-P) to make scalar smaller, which ensures scalar MSB is not
 // set, and the decomposed phi has MSB unset
-fn glv_preprocess_scalar(scalar: &G1ScalarField, window_bits: u32) -> (u128, u128, u128, u128, bool) {
+fn glv_preprocess_scalar(
+    scalar: &G1ScalarField,
+    window_bits: u32,
+) -> (u128, u128, u128, u128, bool) {
     let mut s = [
         scalar.into_repr().as_ref()[0],
         scalar.into_repr().as_ref()[1],
@@ -141,15 +155,15 @@ fn glv_preprocess_scalar(scalar: &G1ScalarField, window_bits: u32) -> (u128, u12
             let mut carry: i128 = 0;
             carry = carry + R0 - s[0] as i128;
             s[0] = (carry as u128 & MASK64) as u64;
-            carry = carry >> 64;
+            carry >>= 64;
 
             carry = carry + R1 - s[1] as i128;
             s[1] = (carry as u128 & MASK64) as u64;
-            carry = carry >> 64;
+            carry >>= 64;
 
             carry = carry + R2 - s[2] as i128;
             s[2] = (carry as u128 & MASK64) as u64;
-            carry = carry >> 64;
+            carry >>= 64;
 
             carry = carry + R3 - s[3] as i128;
             s[3] = (carry as u128 & MASK64) as u64;
@@ -157,16 +171,18 @@ fn glv_preprocess_scalar(scalar: &G1ScalarField, window_bits: u32) -> (u128, u12
         assert!(s[3] < 0x3FFFFFFFFFFFFFFF);
     }
 
-    ( s[0] as u128,
-      s[1] as u128,
-      s[2] as u128,
-      s[3] as u128,
-      is_neg_scalar )
+    (
+        s[0] as u128,
+        s[1] as u128,
+        s[2] as u128,
+        s[3] as u128,
+        is_neg_scalar,
+    )
 }
 
 // if remainder has MSB set, clear MSB by using labmda - remainder, and add
 // carry to quotient
-fn glv_post_processing(q0:&mut u128, q1:&mut u128, r0:&mut u64, r1:&mut u64) -> bool {
+fn glv_post_processing(q0: &mut u128, q1: &mut u128, r0: &mut u64, r1: &mut u64) -> bool {
     if *r1 >= 0x8000000000000000 {
         // add carry to q
         *q0 += 1;
@@ -176,7 +192,7 @@ fn glv_post_processing(q0:&mut u128, q1:&mut u128, r0:&mut u64, r1:&mut u64) -> 
         let mut carry: i128 = 0;
         carry = carry + LMDA0 as i128 - *r0 as i128;
         *r0 = (carry as u128 & MASK64) as u64;
-        carry = carry >> 64;
+        carry >>= 64;
 
         carry = carry + LMDA1 as i128 - *r1 as i128;
         *r1 = (carry as u128 & MASK64) as u64;
@@ -187,7 +203,6 @@ fn glv_post_processing(q0:&mut u128, q1:&mut u128, r0:&mut u64, r1:&mut u64) -> 
     false
 }
 
-
 const BETA: G1BaseField = field_new!(G1BaseField, "4002409555221667392624310435006688643935503118305586438271171395842971157480381377015405980053539358417135540939436");
 
 // lambda * (x, y) = (beta * x, y)
@@ -196,5 +211,5 @@ pub fn endomorphism(point: &mut G1Affine) {
         return;
     }
 
-    point.x = point.x * BETA;
+    point.x *= BETA;
 }
