@@ -1,11 +1,7 @@
-use criterion::{BenchmarkId, black_box, Criterion, criterion_group, criterion_main};
 use ark_bls12_381::G1Affine;
-use ark_msm::{
-    utils::generate_msm_inputs,
-    msm::VariableBaseMSM
-};
 use ark_ec::msm::VariableBaseMSM as BaselineVariableBaseMSM;
-
+use ark_msm::{msm::VariableBaseMSM, utils::generate_msm_inputs};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 fn benchmark_with_baseline(c: &mut Criterion) {
     let mut group = c.benchmark_group("msm");
