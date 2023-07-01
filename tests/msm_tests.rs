@@ -11,9 +11,9 @@ mod msm_test {
     use ark_std::UniformRand;
 
     fn verify_correctness(points: &[G1Affine], scalars: &[G1BigInt], window_size: u32) {
-        let baseline = BaselineVariableBaseMSM::multi_scalar_mul(&points, &scalars);
-        let opt =
-            VariableBaseMSM::multi_scalar_mul_custom(&points, &scalars, window_size, 2048, 256);
+        let baseline = BaselineVariableBaseMSM::multi_scalar_mul(points, scalars);
+        let opt = VariableBaseMSM::multi_scalar_mul_custom(points, scalars, window_size, 2048, 256);
+
         assert_eq!(baseline, opt);
     }
 

@@ -65,11 +65,11 @@ pub fn decompose(
     // r = scalar - t
     let mut carry: i128 = s0 as i128 - (t0 & MASK64) as i128;
     let mut r0: u64 = (carry as u128 & MASK64) as u64;
-    carry = carry >> 64;
+    carry >>= 64;
 
     carry += s1 as i128 - (t1 & MASK64) as i128;
     let mut r1: u64 = (carry as u128 & MASK64) as u64;
-    carry = carry >> 64;
+    carry >>= 64;
 
     carry += s2 as i128 - (t2 & MASK64) as i128;
     let mut r2: u64 = (carry as u128 & MASK64) as u64;
@@ -81,11 +81,11 @@ pub fn decompose(
     loop {
         carry = r0 as i128 - LMDA0 as i128;
         let t0: u64 = (carry as u128 & MASK64) as u64;
-        carry = carry >> 64;
+        carry >>= 64;
 
         carry += r1 as i128 - LMDA1 as i128;
         let t1: u64 = (carry as u128 & MASK64) as u64;
-        carry = carry >> 64;
+        carry >>= 64;
 
         if carry < 0 && r2 == 0 {
             // went negative
@@ -152,15 +152,15 @@ fn glv_preprocess_scalar(
             let mut carry: i128 = 0;
             carry = carry + R0 - s[0] as i128;
             s[0] = (carry as u128 & MASK64) as u64;
-            carry = carry >> 64;
+            carry >>= 64;
 
             carry = carry + R1 - s[1] as i128;
             s[1] = (carry as u128 & MASK64) as u64;
-            carry = carry >> 64;
+            carry >>= 64;
 
             carry = carry + R2 - s[2] as i128;
             s[2] = (carry as u128 & MASK64) as u64;
-            carry = carry >> 64;
+            carry >>= 64;
 
             carry = carry + R3 - s[3] as i128;
             s[3] = (carry as u128 & MASK64) as u64;
@@ -189,7 +189,7 @@ fn glv_post_processing(q0: &mut u128, q1: &mut u128, r0: &mut u64, r1: &mut u64)
         let mut carry: i128 = 0;
         carry = carry + LMDA0 as i128 - *r0 as i128;
         *r0 = (carry as u128 & MASK64) as u64;
-        carry = carry >> 64;
+        carry >>= 64;
 
         carry = carry + LMDA1 as i128 - *r1 as i128;
         *r1 = (carry as u128 & MASK64) as u64;
@@ -208,5 +208,5 @@ pub fn endomorphism(point: &mut G1Affine) {
         return;
     }
 
-    point.x = point.x * BETA;
+    point.x *= BETA;
 }

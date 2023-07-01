@@ -160,7 +160,7 @@ impl<P: Parameters> BatchAdder<P> {
         );
         if p.is_zero() | q.is_zero() {
             if !q.is_zero() {
-                *p = q.clone();
+                *p = *q;
             }
             return;
         }
@@ -195,7 +195,7 @@ impl<P: Parameters> BatchAdder<P> {
         p.x = ss - q.x - p.x;
         delta_x = q.x - p.x;
         p.y = s * delta_x;
-        p.y = p.y - q.y;
+        p.y -= q.y;
     }
 }
 
@@ -215,7 +215,7 @@ mod batch_add_tests {
         let mut rng = ark_std::test_rng();
         let p = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let p_affine = G1Affine::from(p);
-        let mut neg_p_affine = p_affine.clone();
+        let mut neg_p_affine = p_affine;
         neg_p_affine.y = -neg_p_affine.y;
 
         batch_adder.batch_add_phase_one(&p_affine, &neg_p_affine, 0);
@@ -227,10 +227,10 @@ mod batch_add_tests {
         let mut rng = ark_std::test_rng();
         let prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let p = G1Affine::from(prj);
-        let acc = p.clone();
+        let acc = p;
 
         batch_adder.batch_add_phase_one(&acc, &p, 0);
-        assert_eq!(batch_adder.inverses[0].is_one(), true);
+        assert!(batch_adder.inverses[0].is_one());
         assert_eq!(batch_adder.inverse_state, p.y + p.y);
     }
 
@@ -244,7 +244,7 @@ mod batch_add_tests {
         let q = G1Affine::from(q_prj);
 
         batch_adder.batch_add_phase_one(&p, &q, 0);
-        assert_eq!(batch_adder.inverses[0].is_one(), true);
+        assert!(batch_adder.inverses[0].is_one());
         assert_eq!(batch_adder.inverse_state, q.x - p.x);
     }
 
@@ -281,7 +281,7 @@ mod batch_add_tests {
         let mut rng = ark_std::test_rng();
         let p_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let mut acc = G1Affine::from(p_prj);
-        let mut p = acc.clone();
+        let mut p = acc;
         p.y = -p.y;
 
         batch_adder.batch_add_phase_two(&mut acc, &p, 0);
@@ -295,7 +295,7 @@ mod batch_add_tests {
         let mut rng = ark_std::test_rng();
         let acc_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let mut acc = G1Affine::from(acc_prj);
-        let mut p = acc.clone();
+        let mut p = acc;
         p.x = p.x + p.x;
 
         batch_adder.inverses[0] = (p.x - acc.x).inverse().unwrap();
@@ -310,7 +310,7 @@ mod batch_add_tests {
         let mut rng = ark_std::test_rng();
         let acc_prj = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
         let mut acc = G1Affine::from(acc_prj);
-        let p = acc.clone();
+        let p = acc;
 
         batch_adder.inverses[0] = (p.y + p.y).inverse().unwrap();
         batch_adder.batch_add_phase_two(&mut acc, &p, 0);

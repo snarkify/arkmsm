@@ -95,7 +95,7 @@ impl<P: Parameters> BucketMSM<P> {
             p.y = -p.y
         };
 
-        self.cur_points.push(p.clone());
+        self.cur_points.push(p);
         for win in 0..normal_slices.len() {
             if (normal_slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + normal_slices[win] - 1;
@@ -105,7 +105,7 @@ impl<P: Parameters> BucketMSM<P> {
 
         p.y = -p.y;
 
-        self.cur_points.push(p.clone());
+        self.cur_points.push(p);
         for win in 0..normal_slices.len() {
             if (normal_slices[win] as i32) < 0 {
                 let slice = normal_slices[win] & 0x7FFFFFFF;
@@ -123,10 +123,10 @@ impl<P: Parameters> BucketMSM<P> {
         }
 
         // this isn't the cleanest of doing this, we'd better figure out a way to do this at compile time
-        let mut p_g1: &mut G1Affine = unsafe { &mut *(std::ptr::addr_of_mut!(p) as *mut G1Affine) };
-        endomorphism(&mut p_g1);
+        let p_g1: &mut G1Affine = unsafe { &mut *(std::ptr::addr_of_mut!(p) as *mut G1Affine) };
+        endomorphism(p_g1);
 
-        self.cur_points.push(p.clone());
+        self.cur_points.push(p);
         for win in 0..phi_slices.len() {
             if (phi_slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + phi_slices[win] - 1;
@@ -136,7 +136,7 @@ impl<P: Parameters> BucketMSM<P> {
 
         p.y = -p.y;
 
-        self.cur_points.push(p.clone());
+        self.cur_points.push(p);
         for win in 0..phi_slices.len() {
             if (phi_slices[win] as i32) < 0 {
                 let slice = phi_slices[win] & 0x7FFFFFFF;
@@ -156,7 +156,7 @@ impl<P: Parameters> BucketMSM<P> {
             self.num_windows
         );
 
-        self.cur_points.push(point.clone());
+        self.cur_points.push(*point);
         for win in 0..slices.len() {
             if (slices[win] as i32) > 0 {
                 let bucket_id = (win << self.bucket_bits) as u32 + slices[win] - 1; // skip slice == 0
@@ -277,7 +277,7 @@ impl<P: Parameters> BucketMSM<P> {
             })
             .collect();
 
-        return self.intra_window_reduce(&sum_by_window);
+        self.intra_window_reduce(&sum_by_window)
     }
 
     fn inner_window_reduce(
@@ -285,7 +285,7 @@ impl<P: Parameters> BucketMSM<P> {
         running_sums: &[GroupAffine<P>],
         sum_of_sums: &[GroupAffine<P>],
     ) -> GroupProjective<P> {
-        return self.calc_sum_of_sum_total(sum_of_sums) + self.calc_running_sum_total(running_sums);
+        self.calc_sum_of_sum_total(sum_of_sums) + self.calc_running_sum_total(running_sums)
     }
 
     fn calc_running_sum_total(&mut self, running_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
@@ -299,22 +299,22 @@ impl<P: Parameters> BucketMSM<P> {
         for _ in 0..GROUP_SIZE_IN_BITS {
             running_sum_total.double_in_place();
         }
-        return running_sum_total;
+        running_sum_total
     }
 
     fn calc_sum_of_sum_total(&mut self, sum_of_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
         let mut sum = GroupProjective::<P>::zero();
         sum_of_sums.iter().for_each(|p| sum.add_assign_mixed(p));
-        return sum;
+        sum
     }
 
-    fn intra_window_reduce(&mut self, window_sums: &Vec<GroupProjective<P>>) -> GroupProjective<P> {
+    fn intra_window_reduce(&mut self, window_sums: &[GroupProjective<P>]) -> GroupProjective<P> {
         // We store the sum for the lowest window.
         let lowest = *window_sums.first().unwrap();
 
         // We're traversing windows from high to low.
         lowest
-            + &window_sums[1..].iter().rev().fold(
+            + window_sums.iter().skip(1).rev().fold(
                 GroupProjective::<P>::zero(),
                 |mut total, sum_i| {
                     total += sum_i;

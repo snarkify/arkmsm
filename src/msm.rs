@@ -41,24 +41,24 @@ impl VariableBaseMSM {
         }
     }
 
-    fn msm_slice<P: Parameters>(scalar: BigInt<P>, slices: &mut Vec<u32>, window_bits: u32) {
+    fn msm_slice<P: Parameters>(scalar: BigInt<P>, slices: &mut [u32], window_bits: u32) {
         assert!(window_bits <= 31); // reserve one bit for marking signed slices
         let mut temp = scalar;
-        for i in 0..slices.len() {
-            slices[i] = (temp.as_ref()[0] % (1 << window_bits)) as u32;
+        for el in slices.iter_mut() {
+            *el = (temp.as_ref()[0] % (1 << window_bits)) as u32;
             temp.divn(window_bits);
         }
 
         let mut carry = 0;
         let total = 1 << window_bits;
         let half = total >> 1;
-        for i in 0..slices.len() {
-            slices[i] += carry;
-            if slices[i] > half {
+        for el in slices.iter_mut() {
+            *el += carry;
+            if half < *el {
                 // slices[i] == half is okay, since (slice[i]-1) will be used for bucket_id
-                slices[i] = total - slices[i];
+                *el = total - *el;
                 carry = 1;
-                slices[i] |= 1 << 31; // mark the highest bit for later
+                *el |= 1 << 31; // mark the highest bit for later
             } else {
                 carry = 0;
             }
@@ -92,7 +92,7 @@ impl VariableBaseMSM {
             Self::msm_slice::<G1Parameters>(phi.into(), &mut phi_slices, window_bits);
             Self::msm_slice::<G1Parameters>(normal.into(), &mut normal_slices, window_bits);
             bucket_msm.process_point_and_slices_glv(
-                &point,
+                point,
                 &normal_slices,
                 &phi_slices,
                 is_neg_scalar,
@@ -101,7 +101,7 @@ impl VariableBaseMSM {
         });
 
         bucket_msm.process_complete();
-        return bucket_msm.batch_reduce();
+        bucket_msm.batch_reduce()
     }
 
     fn multi_scalar_mul_general<P: Parameters>(
@@ -120,11 +120,11 @@ impl VariableBaseMSM {
         let scalars_and_bases_iter = scalars.iter().zip(points).filter(|(s, _)| !s.is_zero());
         scalars_and_bases_iter.for_each(|(&scalar, point)| {
             Self::msm_slice::<P>(scalar, &mut slices, window_bits);
-            bucket_msm.process_point_and_slices(&point, &slices);
+            bucket_msm.process_point_and_slices(point, &slices);
         });
 
         bucket_msm.process_complete();
-        return bucket_msm.batch_reduce();
+        bucket_msm.batch_reduce()
     }
 
     pub fn multi_scalar_mul_custom<P: Parameters>(
@@ -150,7 +150,7 @@ impl VariableBaseMSM {
         scalars: &[BigInt<P>],
     ) -> GroupProjective<P> {
         let opt_window_size = Self::get_opt_window_size(log2(points.len()));
-        Self::multi_scalar_mul_custom(&points, &scalars, opt_window_size, 2048, 256)
+        Self::multi_scalar_mul_custom(points, scalars, opt_window_size, 2048, 256)
     }
 }
 
@@ -165,14 +165,14 @@ mod collision_method_pippenger_tests {
         let mut slices: Vec<u32> = vec![0; 3];
         VariableBaseMSM::msm_slice::<Parameters>(scalar, &mut slices, 1);
         // print!("slices {:?}\n", slices);
-        assert_eq!(slices.iter().eq([1, 0, 1].iter()), true);
+        assert!(slices.iter().eq([1, 0, 1].iter()));
     }
     #[test]
     fn test_msm_slice_window_size_2() {
         let scalar = G1BigInt::from(0b000110);
         let mut slices: Vec<u32> = vec![0; 3];
         VariableBaseMSM::msm_slice::<Parameters>(scalar, &mut slices, 2);
-        assert_eq!(slices.iter().eq([2, 1, 0].iter()), true);
+        assert!(slices.iter().eq([2, 1, 0].iter()));
     }
 
     #[test]
@@ -180,7 +180,7 @@ mod collision_method_pippenger_tests {
         let scalar = G1BigInt::from(0b010111000);
         let mut slices: Vec<u32> = vec![0; 3];
         VariableBaseMSM::msm_slice::<Parameters>(scalar, &mut slices, 3);
-        assert_eq!(slices.iter().eq([0, 0x80000001, 3].iter()), true);
+        assert!(slices.iter().eq([0, 0x80000001, 3].iter()));
     }
 
     #[test]
@@ -188,6 +188,6 @@ mod collision_method_pippenger_tests {
         let scalar = G1BigInt::from(0x123400007FFF);
         let mut slices: Vec<u32> = vec![0; 3];
         VariableBaseMSM::msm_slice::<Parameters>(scalar, &mut slices, 16);
-        assert_eq!(slices.iter().eq([0x7FFF, 0, 0x1234].iter()), true);
+        assert!(slices.iter().eq([0x7FFF, 0, 0x1234].iter()));
     }
 }
