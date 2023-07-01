@@ -62,7 +62,7 @@ mod glv_tests {
         ]));
         let p = G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng));
 
-        let mut endo_p = p.clone();
+        let mut endo_p = p;
         endomorphism(&mut endo_p);
 
         let lambda_p = G1Affine::from(p.mul(lambda));
