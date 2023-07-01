@@ -1,8 +1,10 @@
-pub mod utils;
+#![allow(clippy::needless_range_loop)]
+
 pub mod bitmap;
 pub mod glv;
-pub mod types;
 pub mod msm;
+pub mod types;
+pub mod utils;
 
-mod bucket_msm;
 mod batch_adder;
+mod bucket_msm;

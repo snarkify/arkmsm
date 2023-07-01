@@ -1,6 +1,7 @@
 use ark_ec::{AffineCurve, ProjectiveCurve};
 use ark_ff::{PrimeField, UniformRand};
 
+#[allow(clippy::type_complexity)]
 pub fn generate_msm_inputs<A>(
     size: usize,
 ) -> (

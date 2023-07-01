@@ -17,7 +17,7 @@ impl Bitmap {
             return true;
         }
         self.data[word as usize] |= bit;
-        return false;
+        false
     }
 
     pub fn clear(&mut self) {
