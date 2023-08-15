@@ -1,3 +1,4 @@
+use all_asserts::assert_lt;
 use ark_ec::{models::SWModelParameters as Parameters, short_weierstrass_jacobian::GroupAffine};
 use ark_ff::Field;
 use ark_std::{One, Zero};
@@ -154,8 +155,9 @@ impl<P: Parameters> BatchAdder<P> {
 
     /// should call inverse() between phase_one and phase_two
     pub fn batch_add_phase_two(&mut self, p: &mut GroupAffine<P>, q: &GroupAffine<P>, idx: usize) {
-        assert!(
-            idx < self.inverses.len(),
+        assert_lt!(
+            idx,
+            self.inverses.len(),
             "index exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!"
         );
         if p.is_zero() | q.is_zero() {

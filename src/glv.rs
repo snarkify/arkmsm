@@ -1,3 +1,4 @@
+use all_asserts::assert_lt;
 use ark_bls12_381::G1Affine;
 use ark_ff::{field_new, BigInteger256, PrimeField};
 use ark_std::Zero;
@@ -75,7 +76,7 @@ pub fn decompose(
     let mut r2: u64 = (carry as u128 & MASK64) as u64;
 
     // remainder is at most 3 * LAMBDA, 130 bit
-    assert!(r2 < 4, "remainder at most 130 bit");
+    assert_lt!(r2, 4, "remainder at most 130 bit");
 
     let mut correction = 0u32;
     loop {
