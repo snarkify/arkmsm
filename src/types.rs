@@ -1,8 +1,5 @@
 use ark_bls12_381::G1Affine;
-use ark_ec::{
-    AffineCurve,
-    models::ModelParameters
-};
+use ark_ec::{models::ModelParameters, AffineCurve};
 use ark_ff::{FpParameters, PrimeField};
 
 pub const G1_SCALAR_SIZE: u32 =
