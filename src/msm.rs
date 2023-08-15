@@ -1,16 +1,16 @@
-use std::any::TypeId;
 use crate::{
     bucket_msm::BucketMSM,
-    glv::{decompose},
-    types::{G1BigInt, BigInt, G1_SCALAR_SIZE_GLV, GROUP_SIZE_IN_BITS},
+    glv::decompose,
+    types::{BigInt, G1BigInt, G1_SCALAR_SIZE_GLV, GROUP_SIZE_IN_BITS},
 };
-use ark_bls12_381::{Fr, g1::Parameters as G1Parameters};
+use ark_bls12_381::{g1::Parameters as G1Parameters, Fr};
+use ark_ec::{
+    models::SWModelParameters as Parameters,
+    short_weierstrass_jacobian::{GroupAffine, GroupProjective},
+};
 use ark_ff::{BigInteger, PrimeField};
 use ark_std::log2;
-use ark_ec::{
-    short_weierstrass_jacobian::{GroupAffine, GroupProjective},
-    models::SWModelParameters as Parameters
-};
+use std::any::TypeId;
 
 pub struct VariableBaseMSM;
 
@@ -37,7 +37,7 @@ impl VariableBaseMSM {
             20 => 15,
             21 => 15,
             22 => 15,
-            _ => 16
+            _ => 16,
         }
     }
 
@@ -74,30 +74,30 @@ impl VariableBaseMSM {
         scalars: &[BigInt<P>],
         window_bits: u32,
         max_batch: u32,
-        max_collisions: u32
+        max_collisions: u32,
     ) -> GroupProjective<P> {
         let num_slices: u32 = (G1_SCALAR_SIZE_GLV + window_bits - 1) / window_bits;
-        let mut bucket_msm = BucketMSM::<P>::new(
-            G1_SCALAR_SIZE_GLV,
-            window_bits,
-            max_batch,
-            max_collisions,
-        );
+        let mut bucket_msm =
+            BucketMSM::<P>::new(G1_SCALAR_SIZE_GLV, window_bits, max_batch, max_collisions);
         // scalar = phi * lambda + normal
         let mut phi_slices: Vec<u32> = vec![0; num_slices as usize];
         let mut normal_slices: Vec<u32> = vec![0; num_slices as usize];
 
-        let scalars_and_bases_iter = scalars
-            .iter()
-            .zip(points)
-            .filter(|(s, _)| !s.is_zero());
+        let scalars_and_bases_iter = scalars.iter().zip(points).filter(|(s, _)| !s.is_zero());
         scalars_and_bases_iter.for_each(|(&scalar, point)| {
             // use unsafe cast for type conversion until we have a better approach
-            let g1_scalar: G1BigInt= unsafe { *(std::ptr::addr_of!(scalar) as *const G1BigInt) };
-            let (phi, normal, is_neg_scalar, is_neg_normal) = decompose(&Fr::from(g1_scalar), window_bits);
+            let g1_scalar: G1BigInt = unsafe { *(std::ptr::addr_of!(scalar) as *const G1BigInt) };
+            let (phi, normal, is_neg_scalar, is_neg_normal) =
+                decompose(&Fr::from(g1_scalar), window_bits);
             Self::msm_slice::<G1Parameters>(phi.into(), &mut phi_slices, window_bits);
             Self::msm_slice::<G1Parameters>(normal.into(), &mut normal_slices, window_bits);
-            bucket_msm.process_point_and_slices_glv(&point, &normal_slices, &phi_slices, is_neg_scalar, is_neg_normal);
+            bucket_msm.process_point_and_slices_glv(
+                &point,
+                &normal_slices,
+                &phi_slices,
+                is_neg_scalar,
+                is_neg_normal,
+            );
         });
 
         bucket_msm.process_complete();
@@ -109,22 +109,15 @@ impl VariableBaseMSM {
         scalars: &[BigInt<P>],
         window_bits: u32,
         max_batch: u32,
-        max_collisions: u32
+        max_collisions: u32,
     ) -> GroupProjective<P> {
         let scalar_size = <P::ScalarField as PrimeField>::size_in_bits() as u32;
         let num_slices: u32 = (scalar_size + window_bits - 1) / window_bits;
-        let mut bucket_msm = BucketMSM::<P>::new(
-            scalar_size,
-            window_bits,
-            max_batch,
-            max_collisions,
-        );
+        let mut bucket_msm =
+            BucketMSM::<P>::new(scalar_size, window_bits, max_batch, max_collisions);
         let mut slices: Vec<u32> = vec![0; num_slices as usize];
 
-        let scalars_and_bases_iter = scalars
-            .iter()
-            .zip(points)
-            .filter(|(s, _)| !s.is_zero());
+        let scalars_and_bases_iter = scalars.iter().zip(points).filter(|(s, _)| !s.is_zero());
         scalars_and_bases_iter.for_each(|(&scalar, point)| {
             Self::msm_slice::<P>(scalar, &mut slices, window_bits);
             bucket_msm.process_point_and_slices(&point, &slices);
@@ -139,10 +132,12 @@ impl VariableBaseMSM {
         scalars: &[BigInt<P>],
         window_bits: u32,
         max_batch: u32,
-        max_collisions: u32
+        max_collisions: u32,
     ) -> GroupProjective<P> {
-        assert!(window_bits as usize > GROUP_SIZE_IN_BITS,
-                "Window_bits must be greater than the default log(group size)");
+        assert!(
+            window_bits as usize > GROUP_SIZE_IN_BITS,
+            "Window_bits must be greater than the default log(group size)"
+        );
         if TypeId::of::<P>() == TypeId::of::<G1Parameters>() {
             Self::multi_scalar_mul_g1_glv(points, scalars, window_bits, max_batch, max_collisions)
         } else {
@@ -150,12 +145,14 @@ impl VariableBaseMSM {
         }
     }
 
-    pub fn multi_scalar_mul<P: Parameters>(points: &[GroupAffine<P>], scalars: &[BigInt<P>]) -> GroupProjective<P> {
+    pub fn multi_scalar_mul<P: Parameters>(
+        points: &[GroupAffine<P>],
+        scalars: &[BigInt<P>],
+    ) -> GroupProjective<P> {
         let opt_window_size = Self::get_opt_window_size(log2(points.len()));
         Self::multi_scalar_mul_custom(&points, &scalars, opt_window_size, 2048, 256)
     }
 }
-
 
 #[cfg(test)]
 mod collision_method_pippenger_tests {

@@ -1,9 +1,6 @@
+use ark_ec::{models::SWModelParameters as Parameters, short_weierstrass_jacobian::GroupAffine};
 use ark_ff::Field;
 use ark_std::{One, Zero};
-use ark_ec::{
-    short_weierstrass_jacobian::GroupAffine,
-    models::SWModelParameters as Parameters
-};
 
 pub struct BatchAdder<P: Parameters> {
     inverse_state: P::BaseField,
@@ -20,7 +17,10 @@ impl<P: Parameters> BatchAdder<P> {
 
     /// Batch add vector dest and src, the results will be stored in dest, i.e. dest[i] = dest[i] + src[i]
     pub fn batch_add(&mut self, dest: &mut [GroupAffine<P>], src: &[GroupAffine<P>]) {
-        assert!(dest.len() == src.len(), "length of dest and src don't match!");
+        assert!(
+            dest.len() == src.len(),
+            "length of dest and src don't match!"
+        );
         assert!(dest.len() <= self.inverses.len(),
                 "input length exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!");
 
@@ -36,14 +36,22 @@ impl<P: Parameters> BatchAdder<P> {
 
     /// Batch add vector dest and src of len entries, skipping dest_step and src_step entries each
     /// the results will be stored in dest, i.e. dest[i] = dest[i] + src[i]
-    pub fn batch_add_step_n(&mut self,
-                            dest: &mut [GroupAffine<P>],
-                            dest_step: usize,
-                            src: &[GroupAffine<P>],
-                            src_step: usize,
-                            len: usize) {
-        assert!(dest.len() > (len - 1) * dest_step, "insufficient entries in dest array");
-        assert!(src.len() > (len - 1) * src_step, "insufficient entries in src array");
+    pub fn batch_add_step_n(
+        &mut self,
+        dest: &mut [GroupAffine<P>],
+        dest_step: usize,
+        src: &[GroupAffine<P>],
+        src_step: usize,
+        len: usize,
+    ) {
+        assert!(
+            dest.len() > (len - 1) * dest_step,
+            "insufficient entries in dest array"
+        );
+        assert!(
+            src.len() > (len - 1) * src_step,
+            "insufficient entries in src array"
+        );
         assert!(len <= self.inverses.len(),
                 "input length exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!");
 
@@ -59,23 +67,40 @@ impl<P: Parameters> BatchAdder<P> {
 
     /// Batch add vector dest[dest_index] and src[src_index] using the specified indexes in input
     /// the results will be stored in dest, i.e. dest[i] = dest[i] + src[i]
-    pub fn batch_add_indexed(&mut self,
-                            dest: &mut [GroupAffine<P>],
-                            dest_indexes: &[u32],
-                            src: &[GroupAffine<P>],
-                            src_indexes: &[u32]) {
-        assert!(dest.len() >= dest_indexes.len(), "insufficient entries in dest array");
+    pub fn batch_add_indexed(
+        &mut self,
+        dest: &mut [GroupAffine<P>],
+        dest_indexes: &[u32],
+        src: &[GroupAffine<P>],
+        src_indexes: &[u32],
+    ) {
+        assert!(
+            dest.len() >= dest_indexes.len(),
+            "insufficient entries in dest array"
+        );
         assert!(dest_indexes.len() <= self.inverses.len(),
                 "input length exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!");
-        assert_eq!(dest_indexes.len(), src_indexes.len(), "length of dest_indexes and src_indexes don't match!");
+        assert_eq!(
+            dest_indexes.len(),
+            src_indexes.len(),
+            "length of dest_indexes and src_indexes don't match!"
+        );
 
         self.reset();
         for i in 0..dest_indexes.len() {
-            self.batch_add_phase_one(&dest[dest_indexes[i] as usize], &src[src_indexes[i] as usize], i);
+            self.batch_add_phase_one(
+                &dest[dest_indexes[i] as usize],
+                &src[src_indexes[i] as usize],
+                i,
+            );
         }
         self.inverse();
         for i in (0..dest_indexes.len()).rev() {
-            self.batch_add_phase_two(&mut dest[dest_indexes[i] as usize], &src[src_indexes[i] as usize], i);
+            self.batch_add_phase_two(
+                &mut dest[dest_indexes[i] as usize],
+                &src[src_indexes[i] as usize],
+                i,
+            );
         }
     }
 
@@ -96,14 +121,11 @@ impl<P: Parameters> BatchAdder<P> {
     ///      - slope s and ss from state
     ///      - inverse_state = inverse_state * deltaX
     ///      - addition result acc
-    pub fn batch_add_phase_one(
-            &mut self,
-            p: &GroupAffine<P>,
-            q: &GroupAffine<P>,
-            idx: usize,
-        ) {
-        assert!(idx < self.inverses.len(),
-                "index exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!");
+    pub fn batch_add_phase_one(&mut self, p: &GroupAffine<P>, q: &GroupAffine<P>, idx: usize) {
+        assert!(
+            idx < self.inverses.len(),
+            "index exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!"
+        );
         if p.is_zero() | q.is_zero() {
             return;
         }
@@ -131,14 +153,11 @@ impl<P: Parameters> BatchAdder<P> {
     }
 
     /// should call inverse() between phase_one and phase_two
-    pub fn batch_add_phase_two(
-            &mut self,
-            p: &mut GroupAffine<P>,
-            q: &GroupAffine<P>,
-            idx: usize,
-        ) {
-        assert!(idx < self.inverses.len(),
-                "index exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!");
+    pub fn batch_add_phase_two(&mut self, p: &mut GroupAffine<P>, q: &GroupAffine<P>, idx: usize) {
+        assert!(
+            idx < self.inverses.len(),
+            "index exceeds the max_batch_cnt, please increase max_batch_cnt during initialization!"
+        );
         if p.is_zero() | q.is_zero() {
             if !q.is_zero() {
                 *p = q.clone();
@@ -184,18 +203,14 @@ impl<P: Parameters> BatchAdder<P> {
 mod batch_add_tests {
     use super::*;
     use ark_bls12_381::G1Affine;
-    use ark_ec::{ProjectiveCurve, AffineCurve};
+    use ark_ec::{AffineCurve, ProjectiveCurve};
     use ark_std::UniformRand;
     use std::ops::Add;
 
     #[test]
     fn test_phase_one_zero_or_neg() {
         let mut batch_adder = BatchAdder::new(4);
-        batch_adder.batch_add_phase_one(
-            &G1Affine::zero(),
-            &G1Affine::zero(),
-            0
-        );
+        batch_adder.batch_add_phase_one(&G1Affine::zero(), &G1Affine::zero(), 0);
 
         let mut rng = ark_std::test_rng();
         let p = <G1Affine as AffineCurve>::Projective::rand(&mut rng);
@@ -203,11 +218,7 @@ mod batch_add_tests {
         let mut neg_p_affine = p_affine.clone();
         neg_p_affine.y = -neg_p_affine.y;
 
-        batch_adder.batch_add_phase_one(
-            &p_affine,
-            &neg_p_affine,
-            0
-        );
+        batch_adder.batch_add_phase_one(&p_affine, &neg_p_affine, 0);
     }
 
     #[test]
@@ -371,8 +382,12 @@ mod batch_add_tests {
         let mut batch_adder = BatchAdder::new(1);
         let mut rng = ark_std::test_rng();
 
-        let mut buckets: Vec<G1Affine> = vec![G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng))];
-        let points: Vec<G1Affine> = vec![G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng))];
+        let mut buckets: Vec<G1Affine> = vec![G1Affine::from(
+            <G1Affine as AffineCurve>::Projective::rand(&mut rng),
+        )];
+        let points: Vec<G1Affine> = vec![G1Affine::from(
+            <G1Affine as AffineCurve>::Projective::rand(&mut rng),
+        )];
 
         let tmp = buckets.clone();
         batch_adder.batch_add_indexed(&mut buckets, &[0], &points, &[0]);

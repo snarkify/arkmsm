@@ -1,11 +1,8 @@
 use ark_bls12_381::G1Affine;
+use ark_ec::msm::VariableBaseMSM as BaselineVariableBaseMSM;
 use ark_ec::AffineCurve;
 use ark_ff::PrimeField;
-use ark_msm::{
-    utils::generate_msm_inputs,
-    msm::VariableBaseMSM
-};
-use ark_ec::msm::VariableBaseMSM as BaselineVariableBaseMSM;
+use ark_msm::{msm::VariableBaseMSM, utils::generate_msm_inputs};
 
 #[cfg(test)]
 mod msm_test {
@@ -15,13 +12,8 @@ mod msm_test {
 
     fn verify_correctness(points: &[G1Affine], scalars: &[G1BigInt], window_size: u32) {
         let baseline = BaselineVariableBaseMSM::multi_scalar_mul(&points, &scalars);
-        let opt = VariableBaseMSM::multi_scalar_mul_custom(
-            &points,
-            &scalars,
-            window_size,
-            2048,
-            256
-        );
+        let opt =
+            VariableBaseMSM::multi_scalar_mul_custom(&points, &scalars, window_size, 2048, 256);
         assert_eq!(baseline, opt);
     }
 
@@ -32,7 +24,9 @@ mod msm_test {
         let mut points: Vec<_> = Vec::new();
         let mut scalars: Vec<_> = Vec::new();
         for _ in 0..num_points {
-            points.push(G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng)));
+            points.push(G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(
+                &mut rng,
+            )));
             scalars.push(<G1Affine as AffineCurve>::ScalarField::rand(&mut rng).into_repr());
         }
 
@@ -62,7 +56,9 @@ mod msm_test {
         let mut points: Vec<_> = Vec::new();
         let mut scalars: Vec<_> = Vec::new();
         for _ in 0..num_points {
-            points.push(G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(&mut rng)));
+            points.push(G1Affine::from(<G1Affine as AffineCurve>::Projective::rand(
+                &mut rng,
+            )));
             scalars.push(<G1Affine as AffineCurve>::ScalarField::rand(&mut rng).into_repr());
         }
 
