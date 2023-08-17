@@ -63,29 +63,44 @@ impl VariableBaseMSM {
         max_batch: u32,
         max_collisions: u32,
     ) -> GroupProjective<P> {
-        let num_slices: u32 = (G1_SCALAR_SIZE_GLV + window_bits - 1) / window_bits;
+        let num_slices: usize = ((G1_SCALAR_SIZE_GLV + window_bits - 1) / window_bits) as usize;
         let mut bucket_msm =
             BucketMSM::<P>::new(G1_SCALAR_SIZE_GLV, window_bits, max_batch, max_collisions);
         // scalar = phi * lambda + normal
-        let mut phi_slices: Vec<u32> = vec![0; num_slices as usize];
-        let mut normal_slices: Vec<u32> = vec![0; num_slices as usize];
+        let mut phi_slices = vec![0u32; num_slices];
+        let mut normal_slices = vec![0u32; num_slices];
 
-        let scalars_and_bases_iter = scalars.iter().zip(points).filter(|(s, _)| !s.is_zero());
-        scalars_and_bases_iter.for_each(|(&scalar, point)| {
-            // use unsafe cast for type conversion until we have a better approach
-            let g1_scalar: G1BigInt = unsafe { *(std::ptr::addr_of!(scalar) as *const G1BigInt) };
-            let (phi, normal, is_neg_scalar, is_neg_normal) =
-                decompose(&Fr::from(g1_scalar), window_bits);
-            Self::msm_slice::<G1Parameters>(phi.into(), &mut phi_slices, window_bits);
-            Self::msm_slice::<G1Parameters>(normal.into(), &mut normal_slices, window_bits);
-            bucket_msm.process_point_and_slices_glv(
-                point,
-                &normal_slices,
-                &phi_slices,
-                is_neg_scalar,
-                is_neg_normal,
-            );
-        });
+        scalars
+            .iter()
+            .zip(points)
+            .filter(|(s, _)| !s.is_zero())
+            .for_each(|(&scalar, point)| {
+                // TODO
+                // use unsafe cast for type conversion until we have a better approach
+                let g1_scalar: G1BigInt =
+                    unsafe { *(std::ptr::addr_of!(scalar) as *const G1BigInt) };
+
+                let (phi, normal, is_neg_scalar, is_neg_normal) =
+                    decompose(&Fr::from(g1_scalar), window_bits);
+
+                Self::msm_slice::<G1Parameters>(
+                    phi.into(),
+                    &mut phi_slices[..num_slices],
+                    window_bits,
+                );
+                Self::msm_slice::<G1Parameters>(
+                    normal.into(),
+                    &mut normal_slices[..num_slices],
+                    window_bits,
+                );
+                bucket_msm.process_point_and_slices_glv(
+                    point,
+                    &normal_slices[..num_slices],
+                    &phi_slices[..num_slices],
+                    is_neg_scalar,
+                    is_neg_normal,
+                );
+            });
 
         bucket_msm.process_complete();
         bucket_msm.batch_reduce()
@@ -99,16 +114,19 @@ impl VariableBaseMSM {
         max_collisions: u32,
     ) -> GroupProjective<P> {
         let scalar_size = <P::ScalarField as PrimeField>::size_in_bits() as u32;
-        let num_slices: u32 = (scalar_size + window_bits - 1) / window_bits;
+        let num_slices: usize = ((scalar_size + window_bits - 1) / window_bits) as usize;
         let mut bucket_msm =
             BucketMSM::<P>::new(scalar_size, window_bits, max_batch, max_collisions);
-        let mut slices: Vec<u32> = vec![0; num_slices as usize];
 
-        let scalars_and_bases_iter = scalars.iter().zip(points).filter(|(s, _)| !s.is_zero());
-        scalars_and_bases_iter.for_each(|(&scalar, point)| {
-            Self::msm_slice::<P>(scalar, &mut slices, window_bits);
-            bucket_msm.process_point_and_slices(point, &slices);
-        });
+        let mut slices = vec![0u32; num_slices];
+        scalars
+            .iter()
+            .zip(points)
+            .filter(|(s, _)| !s.is_zero())
+            .for_each(|(&scalar, point)| {
+                Self::msm_slice::<P>(scalar, &mut slices[..num_slices], window_bits);
+                bucket_msm.process_point_and_slices(point, &slices[..num_slices]);
+            });
 
         bucket_msm.process_complete();
         bucket_msm.batch_reduce()
