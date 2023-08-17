@@ -4,7 +4,8 @@ version = "0.3.0-alpha.2"
 authors = [
     "Jiannan Ouyang <ouyang@snarkify.io>",
     "Boyu Sun <boyu@snarkify.io>",
-    "Chao Ma <chao@snarkify.io>"
+    "Chao Ma <chao@snarkify.io>",
+    "cyphersnake <mikhail@snarkify.io>",
 ]
 description = "An optimized multi-scalar muliplication (MSM) library based on arkworks"
 homepage = "https://github.com/snarkify/arkmsm"
