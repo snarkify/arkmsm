@@ -7,14 +7,21 @@ use ark_msm::{msm::VariableBaseMSM, utils::generate_msm_inputs};
 #[cfg(test)]
 mod msm_test {
     use super::*;
-    use ark_msm::types::G1BigInt;
+    use ark_msm::types::{G1_SCALAR_SIZE, G1BigInt};
     use ark_std::UniformRand;
 
     fn verify_correctness(points: &[G1Affine], scalars: &[G1BigInt], window_size: u32) {
-        let baseline = BaselineVariableBaseMSM::multi_scalar_mul(points, scalars);
-        let opt = VariableBaseMSM::multi_scalar_mul_custom(points, scalars, window_size, 2048, 256);
+        for glv_enabled in [true, false] {
+            if !glv_enabled && G1_SCALAR_SIZE % window_size == 0 {
+                // G1_SCALAR_SIZE % window_size causes overflow when glv is not enabled
+                // TODO: remove this condition when this overflow issue is fixed
+                continue
+            }
+            let baseline = BaselineVariableBaseMSM::multi_scalar_mul(points, scalars);
+            let opt = VariableBaseMSM::multi_scalar_mul_custom(points, scalars, window_size, 2048, 256, glv_enabled);
 
-        assert_eq!(baseline, opt);
+            assert_eq!(baseline, opt);
+        }
     }
 
     #[test]

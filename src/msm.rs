@@ -133,12 +133,17 @@ impl VariableBaseMSM {
         window_bits: u32,
         max_batch: u32,
         max_collisions: u32,
+        glv_enabled: bool
     ) -> GroupProjective<P> {
         assert!(
             window_bits as usize > GROUP_SIZE_IN_BITS,
             "Window_bits must be greater than the default log(group size)"
         );
-        if TypeId::of::<P>() == TypeId::of::<G1Parameters>() {
+        if glv_enabled {
+            assert!(
+                TypeId::of::<P>() == TypeId::of::<G1Parameters>(),
+                "Glv is only supported for bls12-381 curve!"
+            );
             Self::multi_scalar_mul_g1_glv(points, scalars, window_bits, max_batch, max_collisions)
         } else {
             Self::multi_scalar_mul_general(points, scalars, window_bits, max_batch, max_collisions)
@@ -150,7 +155,7 @@ impl VariableBaseMSM {
         scalars: &[BigInt<P>],
     ) -> GroupProjective<P> {
         let opt_window_size = Self::get_opt_window_size(log2(points.len()));
-        Self::multi_scalar_mul_custom(points, scalars, opt_window_size, 2048, 256)
+        Self::multi_scalar_mul_custom(points, scalars, opt_window_size, 2048, 256, true)
     }
 }
 

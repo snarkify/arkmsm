@@ -22,6 +22,7 @@ fn bench_window_size(c: &mut Criterion) {
                         window_size,
                         2048,
                         256,
+                        true,
                     );
                 })
             });
