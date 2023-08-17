@@ -19,25 +19,14 @@ impl VariableBaseMSM {
     /// on a Ubuntu 20.04.2 LTS server with AMD EPYC 7282 16-Core CPU
     /// and 128G memory, the optimal performance may vary on a different
     /// configuration.
-    fn get_opt_window_size(k: u32) -> u32 {
-        if k < 10 {
-            return 8;
-        }
+    const fn get_opt_window_size(k: u32) -> u32 {
         match k {
-            10 => 10,
-            11 => 10,
-            12 => 10,
-            13 => 12,
-            14 => 12,
-            15 => 13,
-            16 => 13,
-            17 => 13,
-            18 => 13,
-            19 => 13,
-            20 => 15,
-            21 => 15,
-            22 => 15,
-            _ => 16,
+            0..=9 => 8,
+            10..=12 => 10,
+            13..=14 => 12,
+            15..=19 => 13,
+            20..=22 => 15,
+            23.. => 16,
         }
     }
 
