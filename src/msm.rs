@@ -133,7 +133,7 @@ impl VariableBaseMSM {
         window_bits: u32,
         max_batch: u32,
         max_collisions: u32,
-        glv_enabled: bool
+        glv_enabled: bool,
     ) -> GroupProjective<P> {
         assert!(
             window_bits as usize > GROUP_SIZE_IN_BITS,
