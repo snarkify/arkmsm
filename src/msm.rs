@@ -30,18 +30,16 @@ impl VariableBaseMSM {
         }
     }
 
-    fn msm_slice<P: Parameters>(scalar: BigInt<P>, slices: &mut [u32], window_bits: u32) {
+    fn msm_slice<P: Parameters>(mut scalar: BigInt<P>, slices: &mut [u32], window_bits: u32) {
         assert!(window_bits <= 31); // reserve one bit for marking signed slices
-        let mut temp = scalar;
-        for el in slices.iter_mut() {
-            *el = (temp.as_ref()[0] % (1 << window_bits)) as u32;
-            temp.divn(window_bits);
-        }
 
         let mut carry = 0;
         let total = 1 << window_bits;
         let half = total >> 1;
-        for el in slices.iter_mut() {
+        slices.iter_mut().for_each(|el| {
+            *el = (scalar.as_ref()[0] % (1 << window_bits)) as u32;
+            scalar.divn(window_bits);
+
             *el += carry;
             if half < *el {
                 // slices[i] == half is okay, since (slice[i]-1) will be used for bucket_id
@@ -51,7 +49,7 @@ impl VariableBaseMSM {
             } else {
                 carry = 0;
             }
-        }
+        });
         assert!(
             carry == 0,
             "msm_slice overflows when apply signed-bucket-index"
