@@ -1,5 +1,3 @@
-#![allow(clippy::needless_range_loop)]
-
 pub mod bitmap;
 pub mod glv;
 pub mod msm;

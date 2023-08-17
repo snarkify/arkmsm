@@ -96,9 +96,9 @@ impl<P: Parameters> BucketMSM<P> {
         };
 
         self.cur_points.push(p);
-        for win in 0..normal_slices.len() {
-            if (normal_slices[win] as i32) > 0 {
-                let bucket_id = (win << self.bucket_bits) as u32 + normal_slices[win] - 1;
+        for (win, normal_slice) in normal_slices.iter().enumerate() {
+            if (*normal_slice as i32) > 0 {
+                let bucket_id = (win << self.bucket_bits) as u32 + normal_slice - 1;
                 self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
             }
         }
@@ -106,9 +106,9 @@ impl<P: Parameters> BucketMSM<P> {
         p.y = -p.y;
 
         self.cur_points.push(p);
-        for win in 0..normal_slices.len() {
-            if (normal_slices[win] as i32) < 0 {
-                let slice = normal_slices[win] & 0x7FFFFFFF;
+        for (win, normal_slice) in normal_slices.iter().enumerate() {
+            if (*normal_slice as i32) < 0 {
+                let slice = normal_slice & 0x7FFFFFFF;
                 if slice > 0 {
                     let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
                     self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
@@ -127,9 +127,9 @@ impl<P: Parameters> BucketMSM<P> {
         endomorphism(p_g1);
 
         self.cur_points.push(p);
-        for win in 0..phi_slices.len() {
-            if (phi_slices[win] as i32) > 0 {
-                let bucket_id = (win << self.bucket_bits) as u32 + phi_slices[win] - 1;
+        for (win, phi_slice) in phi_slices.iter().enumerate() {
+            if (*phi_slice as i32) > 0 {
+                let bucket_id = (win << self.bucket_bits) as u32 + phi_slice - 1;
                 self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
             }
         }
@@ -137,9 +137,9 @@ impl<P: Parameters> BucketMSM<P> {
         p.y = -p.y;
 
         self.cur_points.push(p);
-        for win in 0..phi_slices.len() {
-            if (phi_slices[win] as i32) < 0 {
-                let slice = phi_slices[win] & 0x7FFFFFFF;
+        for (win, phi_slice) in phi_slices.iter().enumerate() {
+            if (*phi_slice as i32) < 0 {
+                let slice = phi_slice & 0x7FFFFFFF;
                 if slice > 0 {
                     let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
                     self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
@@ -157,9 +157,9 @@ impl<P: Parameters> BucketMSM<P> {
         );
 
         self.cur_points.push(*point);
-        for win in 0..slices.len() {
-            if (slices[win] as i32) > 0 {
-                let bucket_id = (win << self.bucket_bits) as u32 + slices[win] - 1; // skip slice == 0
+        for (win, slice) in slices.iter().enumerate() {
+            if (*slice as i32) > 0 {
+                let bucket_id = (win << self.bucket_bits) as u32 + slice - 1; // skip slice == 0
                 self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
             }
         }
@@ -168,9 +168,9 @@ impl<P: Parameters> BucketMSM<P> {
         neg_p.y = -neg_p.y;
 
         self.cur_points.push(neg_p);
-        for win in 0..slices.len() {
-            if (slices[win] as i32) < 0 {
-                let slice = slices[win] & 0x7FFFFFFF;
+        for (win, slice) in slices.iter().enumerate() {
+            if (*slice as i32) < 0 {
+                let slice = slice & 0x7FFFFFFF;
                 if slice > 0 {
                     let bucket_id = (win << self.bucket_bits) as u32 + slice - 1; // skip slice == 0
                     self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
@@ -290,9 +290,9 @@ impl<P: Parameters> BucketMSM<P> {
 
     fn calc_running_sum_total(&mut self, running_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
         let mut running_sum_total = GroupProjective::<P>::zero();
-        for i in 1..running_sums.len() {
+        for (i, running_sum) in running_sums.iter().enumerate().skip(1) {
             for _ in 0..i {
-                running_sum_total.add_assign_mixed(&running_sums[i]);
+                running_sum_total.add_assign_mixed(running_sum);
             }
         }
 
