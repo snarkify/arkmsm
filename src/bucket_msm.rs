@@ -67,8 +67,8 @@ impl<P: Parameters> BucketMSM<P> {
     pub fn process_point_and_slices_glv(
         &mut self,
         point: &GroupAffine<P>,
-        normal_slices: &Vec<u32>,
-        phi_slices: &Vec<u32>,
+        normal_slices: &[u32],
+        phi_slices: &[u32],
         is_neg_scalar: bool,
         is_neg_normal: bool,
     ) {
@@ -148,7 +148,7 @@ impl<P: Parameters> BucketMSM<P> {
         }
     }
 
-    pub fn process_point_and_slices(&mut self, point: &GroupAffine<P>, slices: &Vec<u32>) {
+    pub fn process_point_and_slices(&mut self, point: &GroupAffine<P>, slices: &[u32]) {
         assert!(
             self.num_windows as usize == slices.len(),
             "slices.len() {} should equal num_windows {}",
@@ -343,8 +343,8 @@ mod bucket_msm_tests {
         let p = G1Affine::from(p_prj);
         let q = G1Affine::from(q_prj);
 
-        bucket_msm.process_point_and_slices(&p, &vec![1u32, 3u32]);
-        bucket_msm.process_point_and_slices(&q, &vec![2u32, 3u32]);
+        bucket_msm.process_point_and_slices(&p, &[1u32, 3u32]);
+        bucket_msm.process_point_and_slices(&q, &[2u32, 3u32]);
         bucket_msm.process_complete();
         assert_eq!(bucket_msm.buckets[0], p);
         assert_eq!(bucket_msm.buckets[1], q);
@@ -363,9 +363,9 @@ mod bucket_msm_tests {
         let q = G1Affine::from(q_prj);
         let r = G1Affine::from(r_prj);
 
-        bucket_msm.process_point_and_slices(&p, &vec![1u32, 3u32, 4u32]);
-        bucket_msm.process_point_and_slices(&q, &vec![2u32, 3u32, 4u32]);
-        bucket_msm.process_point_and_slices(&r, &vec![2u32, 3u32, 5u32]);
+        bucket_msm.process_point_and_slices(&p, &[1u32, 3u32, 4u32]);
+        bucket_msm.process_point_and_slices(&q, &[2u32, 3u32, 4u32]);
+        bucket_msm.process_point_and_slices(&r, &[2u32, 3u32, 5u32]);
         bucket_msm.process_complete();
         assert_eq!(bucket_msm.buckets[0], p);
         assert_eq!(bucket_msm.buckets[1], q + r);
@@ -387,20 +387,8 @@ mod bucket_msm_tests {
         let mut p = G1Affine::from(p_prj);
         let mut q = G1Affine::from(q_prj);
 
-        bucket_msm.process_point_and_slices_glv(
-            &p,
-            &vec![1u32, 3u32],
-            &vec![4u32, 6u32],
-            false,
-            false,
-        );
-        bucket_msm.process_point_and_slices_glv(
-            &q,
-            &vec![2u32, 3u32],
-            &vec![5u32, 6u32],
-            false,
-            false,
-        );
+        bucket_msm.process_point_and_slices_glv(&p, &[1u32, 3u32], &[4u32, 6u32], false, false);
+        bucket_msm.process_point_and_slices_glv(&q, &[2u32, 3u32], &[5u32, 6u32], false, false);
         bucket_msm.process_complete();
         assert_eq!(bucket_msm.buckets[0], p);
         assert_eq!(bucket_msm.buckets[1], q);
