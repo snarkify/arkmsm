@@ -1,6 +1,6 @@
-<h1 align="center">ark-msm</h1>
+<h1 align="center">Arkmsm</h1>
 
-`ark-msm` is a Multi-Scalar Multiplication (MSM) module that incorporates
+`arkmsm` is a Multi-Scalar Multiplication (MSM) module that incorporates
 state-of-the-art MSM optimizations into
 [arkworks](https://github.com/arkworks-rs/). This implementation is extensively
 documented, enabling developers to quickly learn and experiment with lastest
@@ -14,8 +14,8 @@ Use at your own discretion.**
 ## Up to 2x Performance Speedup
 
 
-The table below presents a comparison of the latencies of `ark-msm` and Arkworks
-3.0 (baseline) on input sizes ranging from 2^8 to 2^18. Overall, `ark-msm`
+The table below presents a comparison of the latencies of `arkmsm` and Arkworks
+3.0 (baseline) on input sizes ranging from 2^8 to 2^18. Overall, `arkmsm`
 achieved up to 2x speedup over the baseline.
 
 | Input Size (ms)  | 2^8      | 2^9      | 2^10     | 2^11     | 2^12     | 2^13     | 2^14     | 2^15     | 2^16     | 2^17     | 2^18     |
@@ -51,6 +51,7 @@ The table below presents a detailed breakdown of the performance improvements ac
 
 Detailed documentations about each optimization are available at [https://hackmd.io/@drouyang/msm](https://hackmd.io/@drouyang/msm)
 
+Our tech talk ["Optimizing the MINA prover with learnings from zPrize top performers"](https://youtu.be/j8f6phMp-g4?feature=shared) at ZKSummmit 9, Lisbon, April 2023. 
 
 ## Getting Started
 
@@ -71,10 +72,16 @@ Detailed documentations about each optimization are available at [https://hackmd
     cargo criterion --bench bench_with_baseline
     cargo criterion --bench bench_window_size
     ```
+## Usage
+Checkout the [`multi_scalar_mul`](https://docs.rs/ark-msm/0.3.0-alpha.1/ark_msm/msm/struct.VariableBaseMSM.html#method.multi_scalar_mul) method
+ in the [`ark-msm`](https://lib.rs/crates/ark-msm) crate.
+
+Example code is avaiable [here](https://github.com/snarkify/arkmsm/blob/main/benches/bench_with_baseline.rs).
+
 
 ## Acknowledgement
 
-The `ark-msm` project was funded by a grant from the [MINA
+The `arkmsm` project was funded by a grant from the [MINA
 Foundation](https://minaprotocol.com).
 
 Our algorithms and implementations were heavily based on 
@@ -86,5 +93,5 @@ and [Niall Emmart](https://www.linkedin.com/in/niall-emmart-0369384/) from [Yrri
 for generously taking the time to answer our technical questions.
 
 ## Questions
-For technical questions, please contact `ouyang at snarikify.io`
+For technical questions, please contact `hello at snarikify.io`
 
