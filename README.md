@@ -92,6 +92,13 @@ We would like to acknowledge [Gregor Mitscha-Baude](https://twitter.com/mitschab
 and [Niall Emmart](https://www.linkedin.com/in/niall-emmart-0369384/) from [Yrrid Software](https://www.yrrid.com) 
 for generously taking the time to answer our technical questions.
 
-## Questions
-For technical questions, please contact `hello at snarikify.io`
+# Getting Involved
+
+We'd love for you to be a part of our developer community!
+
+Whether you're looking to contribute code, provide feedback, or simply stay in the loop, our Telegram group is the place to be.
+
+:point_right: [Join our developer community](https://t.me/+oQ04SUgs6KMyMzlh)
+
+Thank you for your interest in contributing to `arkmsm`! :sparkles:
 
