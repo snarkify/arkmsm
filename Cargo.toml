@@ -22,7 +22,7 @@ rust-version = "1.63"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-ark-bls12-381 = "0.3.0"
+# ark-bls12-381 = "0.3.0"
 ark-ec = "0.3.0"
 ark-ff = "0.3.0"
 ark-std = "0.3.0"

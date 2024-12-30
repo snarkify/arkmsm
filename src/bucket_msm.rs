@@ -1,17 +1,17 @@
-use ark_bls12_381::g1::Parameters as G1Parameters;
-use ark_bls12_381::G1Affine;
+// use ark_bls12_381::g1::Parameters as G1Parameters;
+// use ark_bls12_381::G1Affine;
 use ark_ec::{
     models::SWModelParameters as Parameters,
     short_weierstrass_jacobian::{GroupAffine, GroupProjective},
     ProjectiveCurve,
 };
 use ark_std::Zero;
-use std::any::TypeId;
+// use std::any::TypeId;
 
 use crate::{
     batch_adder::BatchAdder,
     bitmap::Bitmap,
-    glv::endomorphism,
+    // glv::endomorphism,
     types::{GROUP_SIZE, GROUP_SIZE_IN_BITS},
 };
 
@@ -64,89 +64,89 @@ impl<P: Parameters> BucketMSM<P> {
         }
     }
 
-    pub fn process_point_and_slices_glv(
-        &mut self,
-        point: &GroupAffine<P>,
-        normal_slices: &[u32],
-        phi_slices: &[u32],
-        is_neg_scalar: bool,
-        is_neg_normal: bool,
-    ) {
-        assert_eq!(
-            TypeId::of::<P>(),
-            TypeId::of::<G1Parameters>(),
-            "glv is only supported for ark_bls12_381"
-        );
-        assert!(
-            self.num_windows as usize == normal_slices.len()
-                && normal_slices.len() == phi_slices.len(),
-            "slice len check failed: normal_slices {}, phi_slices {}, num_windows {}",
-            normal_slices.len(),
-            phi_slices.len(),
-            self.num_windows
-        );
+    // pub fn process_point_and_slices_glv(
+    //     &mut self,
+    //     point: &GroupAffine<P>,
+    //     normal_slices: &[u32],
+    //     phi_slices: &[u32],
+    //     is_neg_scalar: bool,
+    //     is_neg_normal: bool,
+    // ) {
+    //     assert_eq!(
+    //         TypeId::of::<P>(),
+    //         TypeId::of::<G1Parameters>(),
+    //         "glv is only supported for ark_bls12_381"
+    //     );
+    //     assert!(
+    //         self.num_windows as usize == normal_slices.len()
+    //             && normal_slices.len() == phi_slices.len(),
+    //         "slice len check failed: normal_slices {}, phi_slices {}, num_windows {}",
+    //         normal_slices.len(),
+    //         phi_slices.len(),
+    //         self.num_windows
+    //     );
 
-        let mut p = *point; // copy
+    //     let mut p = *point; // copy
 
-        if is_neg_scalar {
-            p.y = -p.y
-        };
-        if is_neg_normal {
-            p.y = -p.y
-        };
+    //     if is_neg_scalar {
+    //         p.y = -p.y
+    //     };
+    //     if is_neg_normal {
+    //         p.y = -p.y
+    //     };
 
-        self.cur_points.push(p);
-        for (win, normal_slice) in normal_slices.iter().enumerate() {
-            if (*normal_slice as i32) > 0 {
-                let bucket_id = (win << self.bucket_bits) as u32 + normal_slice - 1;
-                self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
-            }
-        }
+    //     self.cur_points.push(p);
+    //     for (win, normal_slice) in normal_slices.iter().enumerate() {
+    //         if (*normal_slice as i32) > 0 {
+    //             let bucket_id = (win << self.bucket_bits) as u32 + normal_slice - 1;
+    //             self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
+    //         }
+    //     }
 
-        p.y = -p.y;
+    //     p.y = -p.y;
 
-        self.cur_points.push(p);
-        for (win, normal_slice) in normal_slices.iter().enumerate() {
-            if (*normal_slice as i32) < 0 {
-                let slice = normal_slice & 0x7FFFFFFF;
-                if slice > 0 {
-                    let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
-                    self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
-                }
-            }
-        }
+    //     self.cur_points.push(p);
+    //     for (win, normal_slice) in normal_slices.iter().enumerate() {
+    //         if (*normal_slice as i32) < 0 {
+    //             let slice = normal_slice & 0x7FFFFFFF;
+    //             if slice > 0 {
+    //                 let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
+    //                 self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
+    //             }
+    //         }
+    //     }
 
-        // process phi slices
-        p.y = -p.y;
-        if is_neg_normal {
-            p.y = -p.y;
-        }
+    //     // process phi slices
+    //     p.y = -p.y;
+    //     if is_neg_normal {
+    //         p.y = -p.y;
+    //     }
 
-        // this isn't the cleanest of doing this, we'd better figure out a way to do this at compile time
-        let p_g1: &mut G1Affine = unsafe { &mut *(std::ptr::addr_of_mut!(p) as *mut G1Affine) };
-        endomorphism(p_g1);
+    //     // this isn't the cleanest of doing this, we'd better figure out a way to do this at compile time
+    //     let p_g1: &mut G1Affine = unsafe { &mut *(std::ptr::addr_of_mut!(p) as *mut G1Affine) };
+    //     endomorphism(p_g1);
 
-        self.cur_points.push(p);
-        for (win, phi_slice) in phi_slices.iter().enumerate() {
-            if (*phi_slice as i32) > 0 {
-                let bucket_id = (win << self.bucket_bits) as u32 + phi_slice - 1;
-                self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
-            }
-        }
+    //     self.cur_points.push(p);
+    //     for (win, phi_slice) in phi_slices.iter().enumerate() {
+    //         if (*phi_slice as i32) > 0 {
+    //             let bucket_id = (win << self.bucket_bits) as u32 + phi_slice - 1;
+    //             self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
+    //         }
+    //     }
 
-        p.y = -p.y;
+    //     p.y = -p.y;
 
-        self.cur_points.push(p);
-        for (win, phi_slice) in phi_slices.iter().enumerate() {
-            if (*phi_slice as i32) < 0 {
-                let slice = phi_slice & 0x7FFFFFFF;
-                if slice > 0 {
-                    let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
-                    self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
-                }
-            }
-        }
-    }
+    //     self.cur_points.push(p);
+    //     for (win, phi_slice) in phi_slices.iter().enumerate() {
+    //         if (*phi_slice as i32) < 0 {
+    //             let slice = phi_slice & 0x7FFFFFFF;
+    //             if slice > 0 {
+    //                 let bucket_id = (win << self.bucket_bits) as u32 + slice - 1;
+    //                 self._process_slices(bucket_id, self.cur_points.len() as u32 - 1);
+    //             }
+    //         }
+    //     }
+    // }
 
     pub fn process_point_and_slices(&mut self, point: &GroupAffine<P>, slices: &[u32]) {
         assert!(
@@ -377,27 +377,27 @@ mod bucket_msm_tests {
         assert_eq!(bucket_msm.buckets[4 + (2 << bucket_msm.bucket_bits)], r);
     }
 
-    #[test]
-    fn test_process_point_and_slices_glv_deal_two_points() {
-        let window_bits = 15u32;
-        let mut bucket_msm = BucketMSM::new(30u32, window_bits, 128u32, 4096u32);
-        let mut rng = ark_std::test_rng();
-        let p_prj = G1Projective::rand(&mut rng);
-        let q_prj = G1Projective::rand(&mut rng);
-        let mut p = G1Affine::from(p_prj);
-        let mut q = G1Affine::from(q_prj);
+    // #[test]
+    // fn test_process_point_and_slices_glv_deal_two_points() {
+    //     let window_bits = 15u32;
+    //     let mut bucket_msm = BucketMSM::new(30u32, window_bits, 128u32, 4096u32);
+    //     let mut rng = ark_std::test_rng();
+    //     let p_prj = G1Projective::rand(&mut rng);
+    //     let q_prj = G1Projective::rand(&mut rng);
+    //     let mut p = G1Affine::from(p_prj);
+    //     let mut q = G1Affine::from(q_prj);
 
-        bucket_msm.process_point_and_slices_glv(&p, &[1u32, 3u32], &[4u32, 6u32], false, false);
-        bucket_msm.process_point_and_slices_glv(&q, &[2u32, 3u32], &[5u32, 6u32], false, false);
-        bucket_msm.process_complete();
-        assert_eq!(bucket_msm.buckets[0], p);
-        assert_eq!(bucket_msm.buckets[1], q);
-        assert_eq!(bucket_msm.buckets[2 + (1 << bucket_msm.bucket_bits)], p + q);
+    //     bucket_msm.process_point_and_slices_glv(&p, &[1u32, 3u32], &[4u32, 6u32], false, false);
+    //     bucket_msm.process_point_and_slices_glv(&q, &[2u32, 3u32], &[5u32, 6u32], false, false);
+    //     bucket_msm.process_complete();
+    //     assert_eq!(bucket_msm.buckets[0], p);
+    //     assert_eq!(bucket_msm.buckets[1], q);
+    //     assert_eq!(bucket_msm.buckets[2 + (1 << bucket_msm.bucket_bits)], p + q);
 
-        endomorphism(&mut p);
-        endomorphism(&mut q);
-        assert_eq!(bucket_msm.buckets[3], p);
-        assert_eq!(bucket_msm.buckets[4], q);
-        assert_eq!(bucket_msm.buckets[5 + (1 << bucket_msm.bucket_bits)], p + q);
-    }
+    //     endomorphism(&mut p);
+    //     endomorphism(&mut q);
+    //     assert_eq!(bucket_msm.buckets[3], p);
+    //     assert_eq!(bucket_msm.buckets[4], q);
+    //     assert_eq!(bucket_msm.buckets[5 + (1 << bucket_msm.bucket_bits)], p + q);
+    // }
 }
