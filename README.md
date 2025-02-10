@@ -36,7 +36,7 @@ The following optimization techniques were used on top of the Pippenger Algorith
 
 Each optimization is implemented in a separate commit so that the impact of each optimization can be accurately measured.
 
-The table below presents a detailed breakdown of the performance improvements achieved with each optimization technique with a 2^12 intput size.
+The table below presents a detailed breakdown of the performance improvements achieved with each optimization technique with a 2^12 input size.
 
 |                    |Latency (ms)| Improvement |
 |--------------------|------------|-------------|
@@ -76,7 +76,7 @@ Our tech talk ["Optimizing the MINA prover with learnings from zPrize top perfor
 Checkout the [`multi_scalar_mul`](https://docs.rs/ark-msm/0.3.0-alpha.1/ark_msm/msm/struct.VariableBaseMSM.html#method.multi_scalar_mul) method
  in the [`ark-msm`](https://lib.rs/crates/ark-msm) crate.
 
-Example code is avaiable [here](https://github.com/snarkify/arkmsm/blob/main/benches/bench_with_baseline.rs).
+Example code is available [here](https://github.com/snarkify/arkmsm/blob/main/benches/bench_with_baseline.rs).
 
 
 ## Acknowledgement
